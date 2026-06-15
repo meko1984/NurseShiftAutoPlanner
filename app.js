@@ -25,7 +25,7 @@ const SHIFT_CLASS = {
   休: "shift-off",
   有: "shift-paid",
   夏: "shift-summer",
-  冬: "shift-wintter",
+  冬: "shift-winter",
 };
 const AUTO_PLACEMENT_DEFAULTS = {
   targetDayStaff: 3,
