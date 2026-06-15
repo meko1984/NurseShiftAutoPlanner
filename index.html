@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>管理者支援システム Ver0.2</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">NURSE SHIFT PLANNER</p>
+        <h1>管理者支援システム</h1>
+      </div>
+
+      <div class="header-actions">
+        <span id="save-status" class="save-status" role="status" aria-live="polite">
+          ✓ 保存済み
+        </span>
+        <div class="month-control" aria-label="表示年月">
+          <button id="previous-month" class="icon-button" type="button" aria-label="前の月">
+            &larr;
+          </button>
+          <label>
+            <span>表示月</span>
+            <input id="month-picker" type="month" />
+          </label>
+          <button id="next-month" class="icon-button" type="button" aria-label="次の月">
+            &rarr;
+          </button>
+        </div>
+        <button id="reset-app" class="reset-button" type="button">初期化</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="schedule-panel" aria-labelledby="schedule-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">MONTHLY ROSTER</p>
+            <h2 id="schedule-heading">勤務表</h2>
+          </div>
+          <div class="schedule-tools">
+            <div class="input-mode-toggle" role="group" aria-label="入力モード">
+              <button class="mode-button is-active" type="button" data-input-mode="shift">
+                勤務入力
+              </button>
+              <button class="mode-button" type="button" data-input-mode="request">
+                希望入力
+              </button>
+            </div>
+            <div class="legend" aria-label="勤務記号の凡例">
+              <span><i class="legend-chip shift-day">日</i>日勤</span>
+              <span><i class="legend-chip shift-late">遅</i>遅出</span>
+              <span><i class="legend-chip shift-night">入</i>夜勤入</span>
+              <span><i class="legend-chip shift-after">明</i>夜勤明</span>
+              <span><i class="legend-chip shift-off">休</i>公休</span>
+              <span><i class="legend-chip shift-paid">有</i>有休</span>
+              <span><i class="legend-chip request-legend">*</i>希望</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="schedule-scroll" class="schedule-scroll">
+          <table id="schedule-table" class="schedule-table">
+            <caption class="sr-only">月間勤務表と日別集計</caption>
+          </table>
+        </div>
+
+        <p id="table-hint" class="table-hint">
+          勤務セルをクリックすると、勤務記号やパターンを入力できます。
+        </p>
+      </section>
+
+      <aside class="sidebar">
+        <section class="side-card summary-card" aria-labelledby="summary-heading">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">STAFF TOTALS</p>
+              <h2 id="summary-heading">個人集計</h2>
+            </div>
+            <span class="auto-badge">自動集計</span>
+          </div>
+          <div class="side-table-wrap">
+            <table id="summary-table" class="side-table">
+              <caption class="sr-only">スタッフ別勤務集計</caption>
+            </table>
+          </div>
+        </section>
+
+        <section class="side-card pattern-card" aria-labelledby="pattern-heading">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">SHIFT PATTERNS</p>
+              <h2 id="pattern-heading">パターン管理</h2>
+            </div>
+            <span class="version-badge">Ver0.2</span>
+          </div>
+
+          <div id="pattern-list" class="pattern-list" role="radiogroup" aria-label="パターン選択"></div>
+
+          <div class="pattern-actions">
+            <button id="add-pattern" class="compact-button" type="button">＋ 追加</button>
+            <button id="edit-pattern" class="compact-button" type="button">編集</button>
+            <button id="delete-pattern" class="compact-button danger-button" type="button">
+              削除
+            </button>
+          </div>
+
+          <div class="auto-placement">
+            <button id="auto-place-patterns" class="auto-place-button" type="button">
+              自動配置
+            </button>
+            <p class="auto-place-hint">
+              登録パターンを使い、勤務・希望がない空欄だけを埋めます。
+            </p>
+            <p
+              id="auto-placement-result"
+              class="auto-placement-result"
+              role="status"
+              aria-live="polite"
+            ></p>
+          </div>
+        </section>
+
+        <section class="side-card ng-pair-card" aria-labelledby="ng-pair-heading">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">PAIR WARNINGS</p>
+              <h2 id="ng-pair-heading">NGペア</h2>
+            </div>
+            <span class="warning-badge">警告のみ</span>
+          </div>
+
+          <div class="ng-pair-form">
+            <label>
+              <span>スタッフ1</span>
+              <select id="ng-pair-first"></select>
+            </label>
+            <span class="ng-pair-symbol" aria-hidden="true">&times;</span>
+            <label>
+              <span>スタッフ2</span>
+              <select id="ng-pair-second"></select>
+            </label>
+            <button id="add-ng-pair" class="compact-button" type="button">追加</button>
+          </div>
+
+          <p id="ng-pair-error" class="ng-pair-error" role="alert"></p>
+          <div id="ng-pair-list" class="ng-pair-list" aria-label="登録済みNGペア"></div>
+        </section>
+      </aside>
+    </main>
+
+    <div id="cell-editor" class="cell-editor" hidden>
+      <p id="cell-editor-title">勤務を選択</p>
+      <div id="cell-editor-options" class="cell-editor-options"></div>
+    </div>
+
+    <aside id="app-notice" class="app-notice" role="status" aria-live="polite" hidden>
+      <button id="app-notice-close" class="notice-close" type="button" aria-label="通知を閉じる">
+        &times;
+      </button>
+      <p id="app-notice-message"></p>
+      <ul id="app-notice-details"></ul>
+    </aside>
+
+    <dialog id="staff-name-dialog" class="staff-name-dialog">
+      <form id="staff-name-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">STAFF NAME</p>
+            <h2>氏名編集</h2>
+          </div>
+          <button id="staff-name-close" class="dialog-close" type="button" aria-label="閉じる">
+            &times;
+          </button>
+        </div>
+
+        <label class="dialog-field">
+          <span>氏名</span>
+          <input
+            id="staff-name-input"
+            type="text"
+            maxlength="20"
+            autocomplete="off"
+            required
+          />
+        </label>
+        <p id="staff-name-error" class="form-error" role="alert"></p>
+
+        <div class="dialog-actions">
+          <button id="staff-name-cancel" class="secondary-button" type="button">
+            キャンセル
+          </button>
+          <button class="primary-button dialog-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="warning-dialog" class="warning-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">WARNING DETAILS</p>
+            <h2 id="warning-title">警告詳細</h2>
+          </div>
+          <button class="dialog-close" value="close" aria-label="閉じる">&times;</button>
+        </div>
+        <ul id="warning-list" class="warning-list"></ul>
+        <button class="secondary-button" value="close">閉じる</button>
+      </form>
+    </dialog>
+
+    <dialog id="pattern-dialog" class="pattern-dialog">
+      <form id="pattern-editor-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">PATTERN EDITOR</p>
+            <h2 id="pattern-dialog-title">パターン追加</h2>
+          </div>
+          <button id="pattern-dialog-close" class="dialog-close" type="button" aria-label="閉じる">
+            &times;
+          </button>
+        </div>
+
+        <label class="dialog-field">
+          <span>パターン名</span>
+          <input id="pattern-name-input" type="text" maxlength="24" required />
+        </label>
+
+        <div class="sequence-editor">
+          <span class="field-label">勤務の並び</span>
+          <div id="pattern-sequence" class="pattern-sequence"></div>
+          <div id="shift-add-buttons" class="shift-add-buttons" aria-label="勤務記号を追加"></div>
+          <p class="sequence-hint">記号を押すと末尾に追加、並びの記号を押すと削除します。</p>
+        </div>
+
+        <p id="pattern-editor-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="pattern-dialog-cancel" class="secondary-button" type="button">
+            キャンセル
+          </button>
+          <button class="primary-button dialog-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="warning-logic.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
