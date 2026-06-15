@@ -23,6 +23,16 @@ const SHIFT_CLASS = {
   休: "shift-off",
   有: "shift-paid",
 };
+const AUTO_PLACEMENT_DEFAULTS = {
+  targetDayStaff: 3,
+  maxNightStaff: 1,
+  maxLateStaff: 1,
+  warningWeight: 5,
+  dayShortageWeight: 1,
+  dayExcessWeight: 20,
+  nightExcessWeight: 20,
+  lateExcessWeight: 15,
+};
 
 function createInitialData() {
   const now = new Date();
@@ -852,34 +862,95 @@ function getMonthWarningCount() {
   return count;
 }
 
+function getAutoPlacementRules() {
+  const saved = appData.settings.generation ?? {};
+  return {
+    targetDayStaff:
+      Number(saved.targetDayStaff) || AUTO_PLACEMENT_DEFAULTS.targetDayStaff,
+    maxNightStaff:
+      Number(saved.maxNightStaff) || AUTO_PLACEMENT_DEFAULTS.maxNightStaff,
+    maxLateStaff:
+      Number(saved.maxLateStaff) || AUTO_PLACEMENT_DEFAULTS.maxLateStaff,
+    warningWeight:
+      Number(saved.warningWeight) || AUTO_PLACEMENT_DEFAULTS.warningWeight,
+    dayShortageWeight:
+      Number(saved.dayShortageWeight) ||
+      AUTO_PLACEMENT_DEFAULTS.dayShortageWeight,
+    dayExcessWeight:
+      Number(saved.dayExcessWeight) || AUTO_PLACEMENT_DEFAULTS.dayExcessWeight,
+    nightExcessWeight:
+      Number(saved.nightExcessWeight) || AUTO_PLACEMENT_DEFAULTS.nightExcessWeight,
+    lateExcessWeight:
+      Number(saved.lateExcessWeight) || AUTO_PLACEMENT_DEFAULTS.lateExcessWeight,
+  };
+}
+
+function getMonthBalancePenalty() {
+  const rules = getAutoPlacementRules();
+  let penalty = 0;
+
+  for (let day = 1; day <= getDaysInMonth(); day += 1) {
+    const totals = getDailyTotals(day);
+    const dayShortage = Math.max(0, rules.targetDayStaff - totals.day);
+    const dayExcess = Math.max(0, totals.day - rules.targetDayStaff);
+    const nightExcess = Math.max(0, totals.evening - rules.maxNightStaff);
+    const lateExcess = Math.max(0, totals.late - rules.maxLateStaff);
+
+    penalty += dayShortage ** 2 * rules.dayShortageWeight;
+    penalty += dayExcess ** 2 * rules.dayExcessWeight;
+    penalty += nightExcess ** 2 * rules.nightExcessWeight;
+    penalty += lateExcess ** 2 * rules.lateExcessWeight;
+  }
+
+  return penalty;
+}
+
 function evaluateAutoPlacement(staffId, startDay, pattern) {
   // 候補を一時配置し、既存の警告エンジンで評価した後に空欄へ戻す。
   pattern.shifts.forEach((shift, index) => {
     setShift(staffId, startDay + index, shift);
   });
   const warningCount = getMonthWarningCount();
+  const balancePenalty = getMonthBalancePenalty();
+  const score =
+    warningCount * getAutoPlacementRules().warningWeight + balancePenalty;
   pattern.shifts.forEach((shift, index) => {
     setShift(staffId, startDay + index, "");
   });
-  return warningCount;
+  return { warningCount, balancePenalty, score };
+}
+
+function shuffleArray(items) {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [
+      shuffled[randomIndex],
+      shuffled[index],
+    ];
+  }
+  return shuffled;
 }
 
 function selectBestAutoPlacement(staffId, startDay) {
-  const candidates = appData.patterns
+  const candidates = shuffleArray(appData.patterns)
     .filter((pattern) => canAutoPlacePattern(staffId, startDay, pattern))
-    .map((pattern) => ({
-      pattern,
-      warningCount: evaluateAutoPlacement(staffId, startDay, pattern),
-    }));
+    .map((pattern) => ({ pattern, ...evaluateAutoPlacement(staffId, startDay, pattern) }));
   if (!candidates.length) return null;
 
-  const minimumWarnings = Math.min(
-    ...candidates.map((candidate) => candidate.warningCount),
-  );
+  const minimumScore = Math.min(...candidates.map((candidate) => candidate.score));
   const bestCandidates = candidates.filter(
-    (candidate) => candidate.warningCount === minimumWarnings,
+    (candidate) => candidate.score === minimumScore,
   );
   return bestCandidates[Math.floor(Math.random() * bestCandidates.length)];
+}
+
+function getStaffDayOrder(staffIndex, daysInMonth) {
+  const startDay = (staffIndex % daysInMonth) + 1;
+  return Array.from(
+    { length: daysInMonth - startDay + 1 },
+    (_, index) => startDay + index,
+  );
 }
 
 function runAutoPlacement() {
@@ -899,8 +970,9 @@ function runAutoPlacement() {
   let cellCount = 0;
   const daysInMonth = getDaysInMonth();
 
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    appData.staff.forEach((staff) => {
+  appData.staff.forEach((staff, staffIndex) => {
+    const dayOrder = getStaffDayOrder(staffIndex, daysInMonth);
+    dayOrder.forEach((day) => {
       if (getShift(staff.id, day) || getRequest(staff.id, day)) return;
 
       const candidate = selectBestAutoPlacement(staff.id, day);
@@ -912,7 +984,7 @@ function runAutoPlacement() {
       patternCount += 1;
       cellCount += candidate.pattern.shifts.length;
     });
-  }
+  });
 
   saveData();
   renderSchedule();
