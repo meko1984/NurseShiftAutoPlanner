@@ -2,18 +2,20 @@
 
 const STORAGE_KEY = "autoShiftTool.data";
 const DATA_VERSION = 3;
-const SHIFT_OPTIONS = ["", "日", "遅", "入", "明", "休", "有"];
+const SHIFT_OPTIONS = ["", "日", "遅", "入", "明", "休", "有", "夏", "冬"];
 const EDITABLE_SHIFTS = SHIFT_OPTIONS.filter(Boolean);
-const REQUEST_OPTIONS = ["", "休", "有", "日", "遅", "入", "明", "日/遅"];
+const REQUEST_OPTIONS = ["", "休", "有", "日", "遅", "入", "明", "日/遅", "夏", "冬"];
 const REQUEST_LABELS = {
   "": "希望を削除",
-  休: "希望休",
-  有: "希望有",
-  日: "希望日",
-  遅: "希望遅",
-  入: "希望入",
-  明: "希望明",
-  "日/遅": "希望日/遅",
+  休: "休*",
+  有: "有*",
+  日: "日*",
+  遅: "遅*",
+  入: "入*",
+  明: "明*",
+  "日/遅": "日*/遅*",
+  夏: "夏*",
+  冬: "冬*",
 };
 const SHIFT_CLASS = {
   日: "shift-day",
@@ -22,6 +24,8 @@ const SHIFT_CLASS = {
   明: "shift-after",
   休: "shift-off",
   有: "shift-paid",
+  夏: "shift-summer",
+  冬: "shift-wintter",
 };
 const AUTO_PLACEMENT_DEFAULTS = {
   targetDayStaff: 3,
@@ -59,9 +63,9 @@ function createInitialData() {
     requests: {},
     ngPairs: [],
     patterns: [
-      { id: "pattern-1", name: "パターン1", shifts: ["日", "日", "遅", "入", "明", "休"] },
-      { id: "pattern-2", name: "パターン2", shifts: ["日", "遅", "遅", "休"] },
-      { id: "pattern-3", name: "パターン3", shifts: ["日", "遅", "入", "明", "休"] },
+      { id: "pattern-1", name: "パターン1", shifts: ["休", "日", "日", "遅", "入", "明", "休"] },
+      { id: "pattern-2", name: "パターン2", shifts: ["日", "遅", "休"] },
+      { id: "pattern-3", name: "パターン3", shifts: ["入", "明", "休"] },
     ],
     settings: {
       selectedPatternId: "pattern-1",
@@ -946,10 +950,9 @@ function selectBestAutoPlacement(staffId, startDay) {
 }
 
 function getStaffDayOrder(staffIndex, daysInMonth) {
-  const startDay = (staffIndex % daysInMonth) + 1;
   return Array.from(
-    { length: daysInMonth - startDay + 1 },
-    (_, index) => startDay + index,
+    { length: daysInMonth },
+    (_, index) => index + 1,
   );
 }
 

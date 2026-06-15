@@ -517,6 +517,16 @@ thead .power-column {
   background: var(--yellow-soft);
 }
 
+.shift-summer {
+  color: #8a7025;
+  background: var(--yellow-soft);
+}
+
+.shift-winter {
+  color: #8a7025;
+  background: var(--yellow-soft);
+}
+
 .totals-start th,
 .totals-start td {
   border-top: 2px solid var(--green-dark);
