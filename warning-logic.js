@@ -48,17 +48,27 @@
       dayCount: dayStaff.length,
       dayPower: dayStaff.reduce((sum, { staff }) => sum + staff.power, 0),
       nightStaff: assignments.filter(({ shift }) => shift === "入"),
+      afterCount: assignments.filter(({ shift }) => shift === "明").length,
       lateCount: assignments.filter(({ shift }) => shift === "遅").length,
     };
   }
 
-  function hasFiveConsecutiveWorkDays(data, staffId, year, month, day) {
-    for (let offset = 0; offset < 5; offset += 1) {
+  function hasConsecutiveWorkDays(data, staffId, year, month, day, length) {
+    for (let offset = 0; offset < length; offset += 1) {
       if (!WORK_SHIFTS.has(getShift(data, staffId, year, month, day - offset))) {
         return false;
       }
     }
     return true;
+  }
+
+  function getPowerLabel(power) {
+    return {
+      1: "新人相当（P1）",
+      2: "一人前相当（P2）",
+      3: "中堅相当（P3）",
+      4: "管理職相当（P4）",
+    }[power] ?? `P${power}`;
   }
 
   function getPairIds(pair) {
@@ -108,6 +118,8 @@
     const rules = getWarningRules(data);
     const assignments = getDailyAssignments(data, year, month, day);
     const totals = getDailyTotals(assignments);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const canCheckNextDay = day < daysInMonth;
 
     if (totals.dayCount < rules.minDayStaff) {
       warnings.push(
@@ -119,7 +131,9 @@
       ({ staff }) => staff.power === 2 || staff.power === 3,
     );
     if (!hasMiddleOrVeteran) {
-      warnings.push("日勤の中堅以上不足：P2またはP3が日勤にいません。");
+      warnings.push(
+        "日勤の中堅以上不足：一人前相当（P2）または中堅相当（P3）が日勤にいません。",
+      );
     }
 
     if (totals.dayPower < rules.minDayPower) {
@@ -128,13 +142,20 @@
       );
     }
 
+    if (totals.nightStaff.length === 0) {
+      warnings.push("準夜不足：入が0人です。");
+    }
+    if (totals.afterCount === 0) {
+      warnings.push("深夜不足：明が0人です。");
+    }
+
     assignments.forEach(({ staff, shift }) => {
       const nextShift = getShift(data, staff.id, year, month, day + 1);
 
-      if (shift === "入" && nextShift !== "明") {
+      if (canCheckNextDay && shift === "入" && nextShift !== "明") {
         warnings.push(`${staff.name}さん：入の翌日が明ではありません。`);
       }
-      if (shift === "明" && nextShift !== "休") {
+      if (canCheckNextDay && shift === "明" && nextShift !== "休") {
         warnings.push(`${staff.name}さん：明の翌日が休ではありません。`);
       }
       if (shift === "遅" && (nextShift === "日" || nextShift === "明")) {
@@ -142,22 +163,37 @@
       }
       if (
         WORK_SHIFTS.has(shift) &&
-        hasFiveConsecutiveWorkDays(data, staff.id, year, month, day)
+        hasConsecutiveWorkDays(data, staff.id, year, month, day, 6)
       ) {
-        warnings.push(`${staff.name}さん：5連勤以上になっています。`);
+        warnings.push(`${staff.name}さん：6連勤以上になっています。`);
       }
     });
 
     const supportedNightExists = totals.nightStaff.some(({ staff }) => staff.power >= 2);
+    const seniorNightCount = totals.nightStaff.filter(({ staff }) => staff.power >= 2).length;
+    const juniorNightCount = totals.nightStaff.filter(({ staff }) => staff.power === 1).length;
     totals.nightStaff
       .filter(({ staff }) => staff.power === 1)
       .forEach(({ staff }) => {
         if (!supportedNightExists) {
           warnings.push(
-            `${staff.name}さんがP1で入ですが、同日にP2以上の入がいません。`,
+            `${staff.name}さんが${getPowerLabel(1)}で入ですが、同日に一人前相当以上（P2以上）の入がいません。`,
           );
         }
       });
+
+    if (seniorNightCount >= 2) {
+      warnings.push("P2以上の入が複数います。夜勤の基本枠はP2以上1人を想定しています。");
+    }
+    if (juniorNightCount >= 2) {
+      warnings.push("新人相当（P1）の入が複数います。新人夜勤は原則1人までを想定しています。");
+    }
+    if (totals.nightStaff.length >= 3) {
+      warnings.push("入が3人以上います。夜勤人数が多すぎる可能性があります。");
+    }
+    if (totals.lateCount >= 2) {
+      warnings.push("遅出が2人以上います。遅出は1日1人以下を想定しています。");
+    }
 
     if (
       totals.nightStaff.length === 1 &&
