@@ -9,13 +9,30 @@
   const DEFAULT_RULES = {
     minDayStaff: 3,
     minDayPower: 7,
+    targetPublicHoliday: 9,
+    consecutiveWorkDays: 6,
+    maxLateStaff: 1,
+    maxNightStaff: 2,
+    minDeepNightStaff: 1,
+    minEveningStaff: 1,
   };
+
+  function readRule(saved, key) {
+    const value = Number(saved[key]);
+    return Number.isFinite(value) ? value : DEFAULT_RULES[key];
+  }
 
   function getWarningRules(data) {
     const saved = data.settings?.warningRules ?? {};
     return {
-      minDayStaff: Number(saved.minDayStaff) || DEFAULT_RULES.minDayStaff,
-      minDayPower: Number(saved.minDayPower) || DEFAULT_RULES.minDayPower,
+      minDayStaff: readRule(saved, "minDayStaff"),
+      minDayPower: readRule(saved, "minDayPower"),
+      targetPublicHoliday: readRule(saved, "targetPublicHoliday"),
+      consecutiveWorkDays: Math.max(1, readRule(saved, "consecutiveWorkDays")),
+      maxLateStaff: readRule(saved, "maxLateStaff"),
+      maxNightStaff: readRule(saved, "maxNightStaff"),
+      minDeepNightStaff: readRule(saved, "minDeepNightStaff"),
+      minEveningStaff: readRule(saved, "minEveningStaff"),
     };
   }
 
@@ -142,11 +159,11 @@
       );
     }
 
-    if (totals.nightStaff.length === 0) {
-      warnings.push("準夜不足：入が0人です。");
+    if (totals.nightStaff.length < rules.minEveningStaff) {
+      warnings.push(`準夜不足：入が${totals.nightStaff.length}人です。`);
     }
-    if (totals.afterCount === 0) {
-      warnings.push("深夜不足：明が0人です。");
+    if (totals.afterCount < rules.minDeepNightStaff) {
+      warnings.push(`深夜不足：明が${totals.afterCount}人です。`);
     }
 
     assignments.forEach(({ staff, shift }) => {
@@ -163,9 +180,9 @@
       }
       if (
         WORK_SHIFTS.has(shift) &&
-        hasConsecutiveWorkDays(data, staff.id, year, month, day, 6)
+        hasConsecutiveWorkDays(data, staff.id, year, month, day, rules.consecutiveWorkDays)
       ) {
-        warnings.push(`${staff.name}さん：6連勤以上になっています。`);
+        warnings.push(`${staff.name}さん：${rules.consecutiveWorkDays}連勤以上になっています。`);
       }
     });
 
@@ -188,11 +205,15 @@
     if (juniorNightCount >= 2) {
       warnings.push("新人相当（P1）の入が複数います。新人夜勤は原則1人までを想定しています。");
     }
-    if (totals.nightStaff.length >= 3) {
-      warnings.push("入が3人以上います。夜勤人数が多すぎる可能性があります。");
+    if (totals.nightStaff.length > rules.maxNightStaff) {
+      warnings.push(
+        `入が${rules.maxNightStaff + 1}人以上います。夜勤人数が多すぎる可能性があります。`,
+      );
     }
-    if (totals.lateCount >= 2) {
-      warnings.push("遅出が2人以上います。遅出は1日1人以下を想定しています。");
+    if (totals.lateCount > rules.maxLateStaff) {
+      warnings.push(
+        `遅出が${rules.maxLateStaff + 1}人以上います。遅出は1日${rules.maxLateStaff}人以下を想定しています。`,
+      );
     }
 
     if (

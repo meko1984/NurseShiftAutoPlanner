@@ -1,7 +1,7 @@
 "use strict";
 
 const STORAGE_KEY = "autoShiftTool.data";
-const DATA_VERSION = 4;
+const DATA_VERSION = 5;
 const SHIFT_OPTIONS = ["", "日", "遅", "入", "明", "休", "有", "夏", "冬"];
 const EDITABLE_SHIFTS = SHIFT_OPTIONS.filter(Boolean);
 const PATTERN_SHIFT_OPTIONS = SHIFT_OPTIONS;
@@ -40,6 +40,27 @@ const AUTO_PLACEMENT_DEFAULTS = {
   staffBalanceWeight: 2,
   shortPatternWeight: 2,
   patternReuseWeight: 3,
+};
+const DEFAULT_WARNING_RULES = {
+  minDayStaff: 3,
+  minDayPower: 7,
+  targetPublicHoliday: 9,
+  consecutiveWorkDays: 6,
+  maxLateStaff: 1,
+  maxNightStaff: 2,
+  minDeepNightStaff: 1,
+  minEveningStaff: 1,
+};
+
+const RULE_MIN_VALUES = {
+  minDayStaff: 0,
+  minDayPower: 0,
+  targetPublicHoliday: 0,
+  consecutiveWorkDays: 1,
+  maxLateStaff: 0,
+  maxNightStaff: 0,
+  minDeepNightStaff: 0,
+  minEveningStaff: 0,
 };
 const SCORE_RULES = {
   warning: 1,
@@ -85,9 +106,10 @@ function createInitialData() {
       { id: "I", name: "I", power: 1 },
       { id: "J", name: "J", power: 1 },
       { id: "K", name: "K", power: 1 },
-    ],
+    ].map((staff) => ({ ...staff, autoTarget: true })),
     schedules: {},
     requests: {},
+    dayNotes: {},
     ngPairs: [],
     patterns: [
       { id: "pattern-1", name: "基本1", shifts: ["日", "遅", "入", "明", "休"], useForAuto: true },
@@ -99,10 +121,7 @@ function createInitialData() {
     ],
     settings: {
       selectedPatternId: "pattern-1",
-      warningRules: {
-        minDayStaff: 3,
-        minDayPower: 7,
-      },
+      warningRules: { ...DEFAULT_WARNING_RULES },
       generation: {},
       highlightColor: "#2e7d5c",
     },
@@ -154,6 +173,7 @@ function normalizeData(saved) {
           id: item.id,
           name: String(item.name ?? item.id),
           power: [1, 2, 3, 4].includes(Number(item.power)) ? Number(item.power) : 1,
+          autoTarget: item.autoTarget !== false,
         }))
     : initial.staff;
 
@@ -197,6 +217,8 @@ function normalizeData(saved) {
         : saved.settings?.requests && typeof saved.settings.requests === "object"
           ? saved.settings.requests
           : {},
+    dayNotes:
+      saved.dayNotes && typeof saved.dayNotes === "object" ? saved.dayNotes : {},
     ngPairs: normalizeNgPairs(savedNgPairs, staff),
     patterns,
     settings: {
@@ -204,10 +226,7 @@ function normalizeData(saved) {
       selectedPatternId: patterns.some((pattern) => pattern.id === selectedPatternId)
         ? selectedPatternId
         : patterns[0]?.id ?? null,
-      warningRules: {
-        minDayStaff: Number(saved.settings?.warningRules?.minDayStaff) || 3,
-        minDayPower: Number(saved.settings?.warningRules?.minDayPower) || 7,
-      },
+      warningRules: normalizeWarningRules(saved.settings?.warningRules),
       generation:
         saved.settings?.generation && typeof saved.settings.generation === "object"
           ? saved.settings.generation
@@ -218,6 +237,16 @@ function normalizeData(saved) {
           : initial.settings.highlightColor,
     },
   };
+}
+
+function normalizeWarningRules(savedRules = {}) {
+  return Object.fromEntries(
+    Object.entries(DEFAULT_WARNING_RULES).map(([key, defaultValue]) => {
+      const value = Number(savedRules[key]);
+      const min = RULE_MIN_VALUES[key] ?? 0;
+      return [key, Number.isFinite(value) ? Math.max(min, value) : defaultValue];
+    }),
+  );
 }
 
 function loadData() {
@@ -254,6 +283,9 @@ const elements = {
   inputModeButtons: document.querySelectorAll("[data-input-mode]"),
   tableHint: document.querySelector("#table-hint"),
   summaryTable: document.querySelector("#summary-table"),
+  addStaff: document.querySelector("#add-staff"),
+  staffSettingsList: document.querySelector("#staff-settings-list"),
+  ruleSettings: document.querySelector("#rule-settings"),
   patternList: document.querySelector("#pattern-list"),
   ngPairFirst: document.querySelector("#ng-pair-first"),
   ngPairSecond: document.querySelector("#ng-pair-second"),
@@ -329,6 +361,13 @@ function getDaysInMonth() {
   return new Date(appData.display.year, appData.display.month + 1, 0).getDate();
 }
 
+function getWarningRules() {
+  return {
+    ...DEFAULT_WARNING_RULES,
+    ...(appData.settings.warningRules ?? {}),
+  };
+}
+
 function getSelectedPattern() {
   return appData.patterns.find(
     (pattern) => pattern.id === appData.settings.selectedPatternId,
@@ -341,6 +380,21 @@ function getShift(staffId, day) {
 
 function getRequest(staffId, day) {
   return appData.requests[getMonthKey()]?.[staffId]?.[day] ?? "";
+}
+
+function getDayNote(day) {
+  return appData.dayNotes?.[getMonthKey()]?.[day] ?? "";
+}
+
+function setDayNote(day, note) {
+  const monthKey = getMonthKey();
+  appData.dayNotes[monthKey] ??= {};
+  const value = note.trim();
+  if (value) {
+    appData.dayNotes[monthKey][day] = value;
+  } else {
+    delete appData.dayNotes[monthKey][day];
+  }
 }
 
 function setShift(staffId, day, shift) {
@@ -412,12 +466,23 @@ function renderSchedule() {
   const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
   let html = "<thead><tr>";
 
-  html += '<th class="name-column" rowspan="2">氏名</th>';
+  html += '<th class="name-column" rowspan="3">氏名</th>';
+  for (let day = 1; day <= 31; day += 1) {
+    const valid = day <= daysInMonth;
+    const note = valid ? getDayNote(day) : "";
+    html += `<th class="day-column event-column ${valid ? getDayType(day) : "invalid-day"}" ${valid ? `data-day="${day}"` : ""}>${
+      valid
+        ? `<button class="day-note-button" type="button" data-note-day="${day}" title="${escapeHtml(note || "行事予定を入力")}">${escapeHtml(note)}</button>`
+        : ""
+    }</th>`;
+  }
+  html += '<th class="power-column" rowspan="3">P</th></tr><tr>';
+
   for (let day = 1; day <= 31; day += 1) {
     const valid = day <= daysInMonth;
     html += `<th class="day-column ${valid ? getDayType(day) : "invalid-day"}" ${valid ? `data-day="${day}"` : ""}>${valid ? day : ""}</th>`;
   }
-  html += '<th class="power-column" rowspan="2">P</th></tr><tr>';
+  html += '</tr><tr>';
 
   for (let day = 1; day <= 31; day += 1) {
     const valid = day <= daysInMonth;
@@ -430,7 +495,7 @@ function renderSchedule() {
 
   appData.staff.forEach((staff) => {
     html += `
-      <tr>
+      <tr class="staff-row">
         <th scope="row" class="name-column">
           <button
             class="staff-name-button"
@@ -516,25 +581,25 @@ function renderSchedule() {
 }
 
 function getDailyTotalStatusClass(key, value) {
+  const rules = getWarningRules();
   if (key === "power") {
-    if (value <= 4) return "status-danger";
-    if (value <= 6) return "status-warn";
+    if (value < rules.minDayPower - 2) return "status-danger";
+    if (value < rules.minDayPower) return "status-warn";
     return "status-ok";
   }
   if (key === "day") {
-    if (value <= 2) return "status-danger";
-    if (value >= 4) return "status-warn";
+    if (value < rules.minDayStaff) return "status-danger";
     return "status-ok";
   }
   if (key === "deepNight") {
-    return value === 0 ? "status-danger" : "status-ok";
+    return value < rules.minDeepNightStaff ? "status-danger" : "status-ok";
   }
   if (key === "evening") {
-    if (value === 0 || value >= 3) return "status-danger";
+    if (value < rules.minEveningStaff || value > rules.maxNightStaff) return "status-danger";
     return "status-ok";
   }
   if (key === "late") {
-    if (value >= 2) return "status-danger";
+    if (value > rules.maxLateStaff) return "status-danger";
     return value === 0 ? "status-warn" : "status-ok";
   }
   return "";
@@ -627,6 +692,7 @@ function hasConsecutiveWorkDays(staffId, day, length) {
 }
 
 function getScoreRuleViolations(day) {
+  const rules = getWarningRules();
   const violations = {
     nightToAfter: 0,
     afterToOff: 0,
@@ -658,10 +724,10 @@ function getScoreRuleViolations(day) {
       if (!hasSeniorNightStaff) violations.juniorNightSupport += 1;
     });
 
-  if (seniorNightCount >= 2) violations.seniorNightOverlap += 1;
+  if (seniorNightCount > 1) violations.seniorNightOverlap += 1;
   if (juniorNightCount >= 2) violations.juniorNightOverlap += 1;
-  if (nightStaff.length >= 3) violations.nightStaffExcess += 1;
-  if (lateCount >= 2) violations.lateStaffExcess += 1;
+  if (nightStaff.length > rules.maxNightStaff) violations.nightStaffExcess += 1;
+  if (lateCount > rules.maxLateStaff) violations.lateStaffExcess += 1;
 
   appData.staff.forEach((staff) => {
     const shift = getShift(staff.id, day);
@@ -677,7 +743,7 @@ function getScoreRuleViolations(day) {
     if (shift === "遅" && (nextShift === "日" || nextShift === "明")) {
       violations.lateNextDay += 1;
     }
-    if (hasConsecutiveWorkDays(staff.id, day, 6)) {
+    if (hasConsecutiveWorkDays(staff.id, day, rules.consecutiveWorkDays)) {
       violations.sixConsecutiveWorkDays += 1;
     }
   });
@@ -715,6 +781,7 @@ function createScoreCategory(category, items) {
 function calculateShiftScore() {
   let dayCounts = [];
   let nightCounts = [];
+  const rules = getWarningRules();
   const counts = {
     warning: 0,
     powerShortage: 0,
@@ -743,10 +810,10 @@ function calculateShiftScore() {
     const totals = getDailyTotals(day);
     const warnings = getWarnings(day);
     counts.warning += warnings.length;
-    if (totals.power < 7) counts.powerShortage += 1;
-    if (totals.day < 3) counts.dayShortage += 1;
-    if (totals.deepNight === 0) counts.deepNightZero += 1;
-    if (totals.evening === 0) counts.eveningZero += 1;
+    if (totals.power < rules.minDayPower) counts.powerShortage += 1;
+    if (totals.day < rules.minDayStaff) counts.dayShortage += 1;
+    if (totals.deepNight < rules.minDeepNightStaff) counts.deepNightZero += 1;
+    if (totals.evening < rules.minEveningStaff) counts.eveningZero += 1;
     if (totals.late === 0) counts.lateZero += 1;
 
     const violations = getScoreRuleViolations(day);
@@ -766,7 +833,7 @@ function calculateShiftScore() {
 
   appData.staff.forEach((staff) => {
     const totals = getStaffTotals(staff.id);
-    if (totals.publicHoliday !== 9) counts.publicHolidayMismatch += 1;
+    if (totals.publicHoliday !== rules.targetPublicHoliday) counts.publicHolidayMismatch += 1;
     dayCounts.push(totals.日);
     nightCounts.push(totals.入);
   });
@@ -807,7 +874,7 @@ function calculateShiftScore() {
     ]),
     createScoreCategory("公休/公平性", [
       createScoreItem(
-        "公休9日以外",
+        `公休${rules.targetPublicHoliday}日以外`,
         counts.publicHolidayMismatch,
         SCORE_RULES.publicHolidayMismatch,
         "人",
@@ -929,8 +996,9 @@ function renderSummary() {
 }
 
 function getPublicHolidayStatusClass(publicHolidayCount) {
-  if (publicHolidayCount <= 8) return "status-danger";
-  if (publicHolidayCount >= 10) return "status-warn";
+  const target = getWarningRules().targetPublicHoliday;
+  if (publicHolidayCount < target) return "status-danger";
+  if (publicHolidayCount > target) return "status-warn";
   return "status-ok";
 }
 
@@ -1114,10 +1182,62 @@ function renderAll() {
   applyHighlightColor();
   renderSchedule();
   renderSummary();
+  renderStaffSettings();
+  renderRuleSettings();
   renderPatterns();
   renderNgPairs();
   renderInputMode();
   renderShiftScore();
+}
+
+function renderStaffSettings() {
+  elements.staffSettingsList.innerHTML = appData.staff
+    .map(
+      (staff) => `
+        <div class="staff-setting-item">
+          <span title="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}</span>
+          <label>
+            <input
+              type="checkbox"
+              data-auto-target-staff-id="${escapeHtml(staff.id)}"
+              ${staff.autoTarget !== false ? "checked" : ""}
+            />
+            自動対象
+          </label>
+          <button
+            class="staff-delete-button"
+            type="button"
+            data-delete-staff-id="${escapeHtml(staff.id)}"
+            ${appData.staff.length <= 1 ? "disabled" : ""}
+          >
+            削除
+          </button>
+        </div>`,
+    )
+    .join("");
+}
+
+function renderRuleSettings() {
+  const rules = getWarningRules();
+  const fields = [
+    ["minDayStaff", "日勤最低人数"],
+    ["minDayPower", "日勤Power最低値"],
+    ["targetPublicHoliday", "公休目標日数"],
+    ["consecutiveWorkDays", "連勤警告日数"],
+    ["maxLateStaff", "遅出最大人数"],
+    ["maxNightStaff", "入最大人数"],
+    ["minDeepNightStaff", "深夜最低人数"],
+    ["minEveningStaff", "準夜最低人数"],
+  ];
+  elements.ruleSettings.innerHTML = fields
+    .map(
+      ([key, label]) => `
+        <label>
+          <span>${label}</span>
+          <input type="number" min="${RULE_MIN_VALUES[key] ?? 0}" max="31" value="${rules[key]}" data-rule-key="${key}" />
+        </label>`,
+    )
+    .join("");
 }
 
 function getHighlightColor() {
@@ -1258,6 +1378,55 @@ function saveStaffName() {
   closeStaffNameDialog();
   saveData();
   renderAll();
+}
+
+function createStaffId() {
+  let index = appData.staff.length + 1;
+  let id = `staff-${index}`;
+  const existingIds = new Set(appData.staff.map((staff) => staff.id));
+  while (existingIds.has(id)) {
+    index += 1;
+    id = `staff-${index}`;
+  }
+  return id;
+}
+
+function addStaff() {
+  appData.staff.push({
+    id: createStaffId(),
+    name: "新規スタッフ",
+    power: 1,
+    autoTarget: true,
+  });
+  saveData();
+  renderAll();
+  showNotice("スタッフを追加しました。氏名は左端の名前をクリックして編集できます。");
+}
+
+function deleteStaff(staffId) {
+  const staff = appData.staff.find((item) => item.id === staffId);
+  if (!staff || appData.staff.length <= 1) return;
+  if (
+    !window.confirm(
+      `${staff.name}さんを削除します。勤務データも削除されます。よろしいですか？`,
+    )
+  ) {
+    return;
+  }
+
+  appData.staff = appData.staff.filter((item) => item.id !== staffId);
+  Object.values(appData.schedules).forEach((monthSchedule) => {
+    delete monthSchedule[staffId];
+  });
+  Object.values(appData.requests).forEach((monthRequests) => {
+    delete monthRequests[staffId];
+  });
+  appData.ngPairs = appData.ngPairs.filter((pair) => !pair.includes(staffId));
+
+  closeCellEditor();
+  saveData();
+  renderAll();
+  showNotice(`${staff.name}さんを削除しました。`);
 }
 
 function addNgPair() {
@@ -1491,6 +1660,10 @@ function runAutoPlacement() {
       "自動配置に使うパターンがありません。";
     return { patternCount: 0, cellCount: 0 };
   }
+  if (!appData.staff.some((staff) => staff.autoTarget !== false)) {
+    elements.autoPlacementResult.textContent = "自動対象のスタッフがいません。";
+    return { patternCount: 0, cellCount: 0 };
+  }
 
   closeCellEditor();
   hideNotice();
@@ -1503,7 +1676,9 @@ function runAutoPlacement() {
   const daysInMonth = getDaysInMonth();
   const patternUsageCounts = new Map();
 
-  const staffOrder = shuffleArray(appData.staff.map((staff) => ({ staff })));
+  const staffOrder = shuffleArray(
+    appData.staff.filter((staff) => staff.autoTarget !== false).map((staff) => ({ staff })),
+  );
   staffOrder.forEach(({ staff }, staffIndex) => {
     const dayOrder = getStaffDayOrder(staffIndex, daysInMonth);
     dayOrder.forEach((day) => {
@@ -1548,7 +1723,7 @@ function runAutoPlacement() {
 function getAdjustableCells() {
   const adjustableShifts = new Set(["日", "遅", "休"]);
   const cells = [];
-  appData.staff.forEach((staff) => {
+  appData.staff.filter((staff) => staff.autoTarget !== false).forEach((staff) => {
     for (let day = 1; day <= getDaysInMonth(); day += 1) {
       const shift = getShift(staff.id, day);
       if (getRequest(staff.id, day)) continue;
@@ -1570,7 +1745,9 @@ function createNightAdjustmentCandidate() {
       violations.nightStaffExcess;
     if (!shouldReduceNight) continue;
 
-    const nightStaff = appData.staff.filter((staff) => getShift(staff.id, day) === "入");
+    const nightStaff = appData.staff.filter(
+      (staff) => staff.autoTarget !== false && getShift(staff.id, day) === "入",
+    );
     const seniorNightCount = nightStaff.filter((staff) => staff.power >= 2).length;
     const juniorNightCount = nightStaff.filter((staff) => staff.power === 1).length;
     const removableStaff = nightStaff
@@ -1608,7 +1785,9 @@ function createNightAdjustmentCandidate() {
 function createLateExcessAdjustmentCandidate() {
   const candidates = [];
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
-    const lateStaff = appData.staff.filter((staff) => getShift(staff.id, day) === "遅");
+    const lateStaff = appData.staff.filter(
+      (staff) => staff.autoTarget !== false && getShift(staff.id, day) === "遅",
+    );
     if (lateStaff.length < 2) continue;
 
     lateStaff
@@ -1685,6 +1864,12 @@ function undoAdjustmentChange(change) {
 function runAutoAdjustment() {
   closeCellEditor();
   hideNotice();
+  if (!appData.staff.some((staff) => staff.autoTarget !== false)) {
+    const message = "自動対象のスタッフがいません。";
+    elements.autoPlacementResult.textContent = message;
+    showNotice(message);
+    return { initialScore: calculateShiftScore().score, currentScore: calculateShiftScore().score, acceptedCount: 0 };
+  }
 
   const initialScore = calculateShiftScore().score;
   let currentScore = initialScore;
@@ -1856,6 +2041,40 @@ elements.highlightColorPicker.addEventListener("input", (event) => {
   applyHighlightColor();
   saveData();
 });
+elements.addStaff.addEventListener("click", addStaff);
+
+elements.staffSettingsList.addEventListener("change", (event) => {
+  const autoTargetInput = event.target.closest("[data-auto-target-staff-id]");
+  if (!autoTargetInput) return;
+  const staff = appData.staff.find(
+    (item) => item.id === autoTargetInput.dataset.autoTargetStaffId,
+  );
+  if (!staff) return;
+  staff.autoTarget = autoTargetInput.checked;
+  saveData();
+  renderStaffSettings();
+});
+
+elements.staffSettingsList.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-delete-staff-id]");
+  if (!deleteButton) return;
+  deleteStaff(deleteButton.dataset.deleteStaffId);
+});
+
+elements.ruleSettings.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-rule-key]");
+  if (!input) return;
+  const key = input.dataset.ruleKey;
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_WARNING_RULES, key)) return;
+  appData.settings.warningRules[key] = Math.max(
+    RULE_MIN_VALUES[key] ?? 0,
+    Number(input.value) || 0,
+  );
+  saveData();
+  renderSchedule();
+  renderSummary();
+  renderRuleSettings();
+});
 elements.shiftScore.addEventListener("mouseenter", () => openScorePanel());
 elements.shiftScore.addEventListener("focus", () => openScorePanel());
 elements.shiftScore.addEventListener("mouseleave", () => closeScorePanel());
@@ -1916,6 +2135,18 @@ elements.ngPairList.addEventListener("click", (event) => {
 });
 
 elements.scheduleTable.addEventListener("click", (event) => {
+  const noteButton = event.target.closest("[data-note-day]");
+  if (noteButton) {
+    const day = Number(noteButton.dataset.noteDay);
+    const current = getDayNote(day);
+    const next = window.prompt(`${appData.display.month + 1}月${day}日の祝祭日・行事予定`, current);
+    if (next === null) return;
+    setDayNote(day, next);
+    saveData();
+    renderSchedule();
+    return;
+  }
+
   const staffNameButton = event.target.closest("[data-name-staff-id]");
   if (staffNameButton) {
     openStaffNameDialog(staffNameButton.dataset.nameStaffId);

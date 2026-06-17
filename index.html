@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>管理者支援システム Ver0.2</title>
+    <title>管理者支援システム Ver0.5</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -76,19 +76,9 @@
                 希望入力
               </button>
             </div>
-            <div class="legend" aria-label="勤務記号の凡例">
-              <span><i class="legend-chip shift-day">日</i>日勤</span>
-              <span><i class="legend-chip shift-late">遅</i>遅出</span>
-              <span><i class="legend-chip shift-night">入</i>夜勤入</span>
-              <span><i class="legend-chip shift-after">明</i>夜勤明</span>
-              <span><i class="legend-chip shift-off">休</i>公休</span>
-              <span><i class="legend-chip shift-paid">有</i>有休</span>
-              <span><i class="legend-chip shift-summer">夏</i>夏休</span>
-              <span><i class="legend-chip shift-winter">冬</i>冬休</span>
-              <span><i class="legend-chip request-legend">*</i>希望</span>
-              <span><i class="legend-chip warning-legend">!</i>警告</span>
-              <span><i class="legend-chip boundary-legend">↔</i>月またぎ確認</span>
-            </div>
+            <p id="table-hint" class="table-hint table-hint-top">
+              勤務セルをクリックすると、勤務記号やパターンを入力できます。
+            </p>
           </div>
         </div>
 
@@ -98,9 +88,93 @@
           </table>
         </div>
 
-        <p id="table-hint" class="table-hint">
-          勤務セルをクリックすると、勤務記号やパターンを入力できます。
-        </p>
+        <div class="legend table-legend" aria-label="勤務記号の凡例">
+          <span><i class="legend-chip shift-day">日</i>日勤</span>
+          <span><i class="legend-chip shift-late">遅</i>遅出</span>
+          <span><i class="legend-chip shift-night">入</i>夜勤入</span>
+          <span><i class="legend-chip shift-after">明</i>夜勤明</span>
+          <span><i class="legend-chip shift-off">休</i>公休</span>
+          <span><i class="legend-chip shift-paid">有</i>有休</span>
+          <span><i class="legend-chip shift-summer">夏</i>夏休</span>
+          <span><i class="legend-chip shift-winter">冬</i>冬休</span>
+          <span><i class="legend-chip request-legend">*</i>希望</span>
+          <span><i class="legend-chip warning-legend">!</i>警告</span>
+          <span><i class="legend-chip boundary-legend">↔</i>月またぎ確認</span>
+        </div>
+
+        <div class="settings-grid" aria-label="勤務表下の設定">
+          <section class="pattern-card pattern-card-wide" aria-labelledby="pattern-heading">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">SHIFT PATTERNS</p>
+                <h2 id="pattern-heading">パターン管理</h2>
+              </div>
+              <span class="version-badge">Ver0.5</span>
+            </div>
+
+            <div id="pattern-list" class="pattern-list" role="group" aria-label="パターン選択"></div>
+
+            <div class="pattern-actions">
+              <button id="add-pattern" class="compact-button" type="button">＋ 追加</button>
+              <button id="edit-pattern" class="compact-button" type="button">編集</button>
+              <button id="delete-pattern" class="compact-button danger-button" type="button">
+                削除
+              </button>
+            </div>
+
+            <div class="auto-placement">
+              <button id="auto-place-patterns" class="auto-place-button" type="button">
+                自動配置
+              </button>
+              <p class="auto-place-hint">
+                登録済みパターンで、勤務・希望がない空欄だけを埋めます。
+              </p>
+              <p
+                id="auto-placement-result"
+                class="auto-placement-result"
+                role="status"
+                aria-live="polite"
+              ></p>
+            </div>
+          </section>
+
+          <section class="side-card staff-card" aria-labelledby="staff-settings-heading">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">STAFF SETTINGS</p>
+                <h2 id="staff-settings-heading">スタッフ管理</h2>
+              </div>
+              <button id="add-staff" class="compact-button" type="button">＋ 追加</button>
+            </div>
+            <div id="staff-settings-list" class="staff-settings-list"></div>
+          </section>
+
+          <section class="side-card ng-pair-card" aria-labelledby="ng-pair-heading">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">PAIR WARNINGS</p>
+                <h2 id="ng-pair-heading">NGペア</h2>
+              </div>
+              <span class="warning-badge">警告のみ</span>
+            </div>
+
+            <div class="ng-pair-form">
+              <label>
+                <span>スタッフ1</span>
+                <select id="ng-pair-first"></select>
+              </label>
+              <span class="ng-pair-symbol" aria-hidden="true">&times;</span>
+              <label>
+                <span>スタッフ2</span>
+                <select id="ng-pair-second"></select>
+              </label>
+              <button id="add-ng-pair" class="compact-button" type="button">追加</button>
+            </div>
+
+            <p id="ng-pair-error" class="ng-pair-error" role="alert"></p>
+            <div id="ng-pair-list" class="ng-pair-list" aria-label="登録済みNGペア"></div>
+          </section>
+        </div>
       </section>
 
       <aside class="sidebar">
@@ -119,65 +193,14 @@
           </div>
         </section>
 
-        <section class="side-card pattern-card" aria-labelledby="pattern-heading">
+        <section class="side-card rule-card" aria-labelledby="rule-settings-heading">
           <div class="card-heading">
             <div>
-              <p class="section-kicker">SHIFT PATTERNS</p>
-              <h2 id="pattern-heading">パターン管理</h2>
+              <p class="section-kicker">RULE SETTINGS</p>
+              <h2 id="rule-settings-heading">ルール設定</h2>
             </div>
-            <span class="version-badge">Ver0.2</span>
           </div>
-
-          <div id="pattern-list" class="pattern-list" role="group" aria-label="パターン選択"></div>
-
-          <div class="pattern-actions">
-            <button id="add-pattern" class="compact-button" type="button">＋ 追加</button>
-            <button id="edit-pattern" class="compact-button" type="button">編集</button>
-            <button id="delete-pattern" class="compact-button danger-button" type="button">
-              削除
-            </button>
-          </div>
-
-          <div class="auto-placement">
-            <button id="auto-place-patterns" class="auto-place-button" type="button">
-              自動配置
-            </button>
-            <p class="auto-place-hint">
-              登録済みパターンで、勤務・希望がない空欄だけを埋めます。
-            </p>
-            <p
-              id="auto-placement-result"
-              class="auto-placement-result"
-              role="status"
-              aria-live="polite"
-            ></p>
-          </div>
-        </section>
-
-        <section class="side-card ng-pair-card" aria-labelledby="ng-pair-heading">
-          <div class="card-heading">
-            <div>
-              <p class="section-kicker">PAIR WARNINGS</p>
-              <h2 id="ng-pair-heading">NGペア</h2>
-            </div>
-            <span class="warning-badge">警告のみ</span>
-          </div>
-
-          <div class="ng-pair-form">
-            <label>
-              <span>スタッフ1</span>
-              <select id="ng-pair-first"></select>
-            </label>
-            <span class="ng-pair-symbol" aria-hidden="true">&times;</span>
-            <label>
-              <span>スタッフ2</span>
-              <select id="ng-pair-second"></select>
-            </label>
-            <button id="add-ng-pair" class="compact-button" type="button">追加</button>
-          </div>
-
-          <p id="ng-pair-error" class="ng-pair-error" role="alert"></p>
-          <div id="ng-pair-list" class="ng-pair-list" aria-label="登録済みNGペア"></div>
+          <div id="rule-settings" class="rule-settings"></div>
         </section>
       </aside>
     </main>
