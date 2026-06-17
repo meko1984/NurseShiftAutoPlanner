@@ -497,15 +497,7 @@ function renderSchedule() {
     html += `
       <tr class="staff-row">
         <th scope="row" class="name-column">
-          <button
-            class="staff-name-button"
-            type="button"
-            data-name-staff-id="${escapeHtml(staff.id)}"
-            title="${escapeHtml(staff.name)}"
-            aria-label="${escapeHtml(staff.name)}さんの氏名を編集"
-          >
-            <span>${escapeHtml(staff.name)}</span>
-          </button>
+          <span class="staff-name-label" title="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}</span>
         </th>`;
     for (let day = 1; day <= 31; day += 1) {
       if (day > daysInMonth) {
@@ -529,14 +521,7 @@ function renderSchedule() {
     }
     html += `
       <td class="power-column">
-        <select class="power-select" data-power-staff-id="${escapeHtml(staff.id)}" aria-label="${escapeHtml(staff.name)}さんのPower">
-          ${[1, 2, 3, 4]
-            .map(
-              (power) =>
-                `<option value="${power}" ${power === staff.power ? "selected" : ""}>${power}</option>`,
-            )
-            .join("")}
-        </select>
+        <span class="power-display" aria-label="${escapeHtml(staff.name)}さんのPower">${staff.power}</span>
       </td></tr>`;
   });
 
@@ -913,7 +898,7 @@ function calculateShiftScore() {
 
 function renderShiftScore() {
   const result = calculateShiftScore();
-  elements.shiftScore.textContent = `シフトスコア：${result.score}点`;
+  elements.shiftScore.textContent = `評点：${result.score}点`;
   elements.shiftScorePanel.innerHTML = createScoreBreakdownHtml(result);
 }
 
@@ -964,9 +949,9 @@ function createScoreBreakdownHtml(result) {
     : '<p class="score-breakdown-empty">減点項目はありません。</p>';
 
   return `
-    <p class="score-breakdown-title">シフトスコア減点内訳</p>
+    <p class="score-breakdown-title">評点内訳</p>
     <div class="score-breakdown-summary">
-      <span>現在スコア：${result.score}点</span>
+      <span>現在評点：${result.score}点</span>
       <span>合計減点：${result.totalPenalty}点</span>
     </div>
     ${categories}`;
@@ -1196,6 +1181,17 @@ function renderStaffSettings() {
       (staff) => `
         <div class="staff-setting-item">
           <span title="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}</span>
+          <label class="staff-power-setting">
+            <span>P</span>
+            <select data-power-staff-id="${escapeHtml(staff.id)}" aria-label="${escapeHtml(staff.name)}さんのPower">
+              ${[1, 2, 3, 4]
+                .map(
+                  (power) =>
+                    `<option value="${power}" ${power === staff.power ? "selected" : ""}>${power}</option>`,
+                )
+                .join("")}
+            </select>
+          </label>
           <label>
             <input
               type="checkbox"
@@ -1204,6 +1200,13 @@ function renderStaffSettings() {
             />
             自動対象
           </label>
+          <button
+            class="staff-edit-button"
+            type="button"
+            data-name-staff-id="${escapeHtml(staff.id)}"
+          >
+            名前
+          </button>
           <button
             class="staff-delete-button"
             type="button"
@@ -1271,8 +1274,8 @@ function renderInputMode() {
   });
   elements.tableHint.textContent =
     uiState.inputMode === "request"
-      ? "希望入力モード：セルで希望を登録できます。左端の氏名をクリックすると名前を編集できます。"
-      : "勤務入力モード：セルで勤務を入力できます。左端の氏名をクリックすると名前を編集できます。";
+      ? "希望入力モード：セルで希望を登録できます。氏名とP値はスタッフ管理で編集できます。"
+      : "勤務入力モード：セルで勤務を入力できます。氏名とP値はスタッフ管理で編集できます。";
 }
 
 function clearScheduleHover() {
@@ -1400,7 +1403,7 @@ function addStaff() {
   });
   saveData();
   renderAll();
-  showNotice("スタッフを追加しました。氏名は左端の名前をクリックして編集できます。");
+  showNotice("スタッフを追加しました。氏名とP値はスタッフ管理で編集できます。");
 }
 
 function deleteStaff(staffId) {
@@ -1427,6 +1430,16 @@ function deleteStaff(staffId) {
   saveData();
   renderAll();
   showNotice(`${staff.name}さんを削除しました。`);
+}
+
+function updateStaffPower(staffId, power) {
+  const staff = appData.staff.find((item) => item.id === staffId);
+  if (!staff) return;
+  staff.power = power;
+  saveData();
+  renderSchedule();
+  renderSummary();
+  renderStaffSettings();
 }
 
 function addNgPair() {
@@ -2044,6 +2057,12 @@ elements.highlightColorPicker.addEventListener("input", (event) => {
 elements.addStaff.addEventListener("click", addStaff);
 
 elements.staffSettingsList.addEventListener("change", (event) => {
+  const powerSelect = event.target.closest("[data-power-staff-id]");
+  if (powerSelect) {
+    updateStaffPower(powerSelect.dataset.powerStaffId, Number(powerSelect.value));
+    return;
+  }
+
   const autoTargetInput = event.target.closest("[data-auto-target-staff-id]");
   if (!autoTargetInput) return;
   const staff = appData.staff.find(
@@ -2056,6 +2075,12 @@ elements.staffSettingsList.addEventListener("change", (event) => {
 });
 
 elements.staffSettingsList.addEventListener("click", (event) => {
+  const nameButton = event.target.closest("[data-name-staff-id]");
+  if (nameButton) {
+    openStaffNameDialog(nameButton.dataset.nameStaffId);
+    return;
+  }
+
   const deleteButton = event.target.closest("[data-delete-staff-id]");
   if (!deleteButton) return;
   deleteStaff(deleteButton.dataset.deleteStaffId);
@@ -2147,12 +2172,6 @@ elements.scheduleTable.addEventListener("click", (event) => {
     return;
   }
 
-  const staffNameButton = event.target.closest("[data-name-staff-id]");
-  if (staffNameButton) {
-    openStaffNameDialog(staffNameButton.dataset.nameStaffId);
-    return;
-  }
-
   const shiftButton = event.target.closest(".shift-button");
   if (shiftButton) {
     openCellEditor(shiftButton);
@@ -2167,16 +2186,6 @@ elements.scheduleTable.addEventListener("mouseover", (event) => {
 });
 
 elements.scheduleTable.addEventListener("mouseleave", clearScheduleHover);
-
-elements.scheduleTable.addEventListener("change", (event) => {
-  const powerSelect = event.target.closest(".power-select");
-  if (!powerSelect) return;
-  const staff = appData.staff.find((item) => item.id === powerSelect.dataset.powerStaffId);
-  if (!staff) return;
-  staff.power = Number(powerSelect.value);
-  saveData();
-  renderSchedule();
-});
 
 elements.cellEditorOptions.addEventListener("click", (event) => {
   const patternOption = event.target.closest("[data-cell-pattern-id]");

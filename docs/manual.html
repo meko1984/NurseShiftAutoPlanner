@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>管理者支援システム Ver0.5 取扱説明書</title>
+    <style>
+      :root {
+        color: #25342d;
+        background: #f6f8f6;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+          "Yu Gothic", sans-serif;
+        line-height: 1.8;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 18px 56px;
+      }
+
+      header {
+        margin-bottom: 28px;
+        padding: 28px;
+        border: 1px solid #d9e3dc;
+        border-radius: 18px;
+        background: white;
+        box-shadow: 0 14px 40px rgba(35, 58, 45, 0.08);
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        color: #1f6b4f;
+        font-size: clamp(28px, 4vw, 42px);
+      }
+
+      h2 {
+        margin-top: 40px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #cfe0d6;
+        color: #1f6b4f;
+        font-size: 24px;
+      }
+
+      h3 {
+        margin-top: 28px;
+        color: #2e7d5c;
+      }
+
+      p,
+      li {
+        font-size: 15px;
+      }
+
+      a {
+        color: #1f6b4f;
+      }
+
+      img {
+        display: block;
+        width: 100%;
+        max-width: 760px;
+        min-height: 120px;
+        margin: 14px 0 20px;
+        border: 1px dashed #b8c9bf;
+        border-radius: 12px;
+        object-fit: contain;
+        background: #eef4f0;
+      }
+
+      code {
+        padding: 0.1em 0.35em;
+        border-radius: 5px;
+        background: #edf3ef;
+      }
+
+      .note {
+        padding: 14px 16px;
+        border-left: 5px solid #d8b54e;
+        border-radius: 10px;
+        background: #fff8df;
+      }
+
+      .toc {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 6px 20px;
+        padding: 18px;
+        border: 1px solid #d9e3dc;
+        border-radius: 14px;
+        background: white;
+      }
+
+      .toc a {
+        text-decoration: none;
+      }
+
+      section {
+        margin-top: 28px;
+        padding: 1px 0;
+      }
+
+      section,
+      img,
+      ul,
+      .note {
+        break-inside: avoid;
+      }
+
+      @media print {
+        @page {
+          size: A4;
+          margin: 14mm 13mm;
+        }
+
+        * {
+          box-shadow: none !important;
+        }
+
+        :root {
+          color: #000;
+          background: #fff;
+          line-height: 1.65;
+        }
+
+        body {
+          background: white;
+        }
+
+        main {
+          max-width: none;
+          padding: 0;
+        }
+
+        header {
+          margin-bottom: 12mm;
+          padding: 0 0 8mm;
+          border: 0;
+          border-bottom: 1px solid #999;
+          border-radius: 0;
+          background: #fff;
+        }
+
+        .toc,
+        .no-print {
+          display: none !important;
+        }
+
+        h1 {
+          color: #000;
+          font-size: 22pt;
+        }
+
+        h2 {
+          margin-top: 9mm;
+          padding-bottom: 2.5mm;
+          border-bottom: 1px solid #999;
+          color: #000;
+          font-size: 16pt;
+          break-after: avoid;
+        }
+
+        h3 {
+          color: #000;
+          font-size: 12pt;
+          break-after: avoid;
+        }
+
+        p,
+        li {
+          font-size: 10.5pt;
+        }
+
+        section {
+          margin-top: 7mm;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+
+        img {
+          max-width: 100%;
+          min-height: 32mm;
+          max-height: 105mm;
+          margin: 3mm 0 5mm;
+          border-color: #bbb;
+          border-radius: 3mm;
+          background: #fff;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+
+        .toc {
+          box-shadow: none;
+        }
+
+        a {
+          color: #000;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p>NURSE SHIFT PLANNER</p>
+        <h1>管理者支援システム Ver0.5 取扱説明書</h1>
+        <p>
+          この説明書は、現在のコードで確認できる実装済み機能に基づいて作成しています。
+        </p>
+      </header>
+
+      <nav class="toc no-print" aria-label="目次">
+        <a href="#overview">1. アプリ概要</a>
+        <a href="#layout">2. 画面構成</a>
+        <a href="#shift-input">3. 勤務入力モード</a>
+        <a href="#request-input">4. 希望入力モード</a>
+        <a href="#staff-power">5. スタッフ名・P値</a>
+        <a href="#staff-add-delete">6. スタッフ追加・削除</a>
+        <a href="#auto-placement">7. 自動配置</a>
+        <a href="#auto-adjustment">8. 自動調整</a>
+        <a href="#patterns">9. パターン管理</a>
+        <a href="#staff-management">10. スタッフ管理</a>
+        <a href="#ng-pair">11. NGペア</a>
+        <a href="#day-notes">12. 行事予定欄</a>
+        <a href="#score">13. 評点</a>
+        <a href="#warnings">14. 警告表示</a>
+        <a href="#boundary">15. 月またぎ確認</a>
+        <a href="#summary">16. 集計</a>
+        <a href="#rules">17. ルール設定</a>
+        <a href="#highlight">18. ハイライト色</a>
+        <a href="#clear-reset">19. クリアと初期化</a>
+        <a href="#storage">20. 自動保存</a>
+        <a href="#notes">21. 注意事項・免責</a>
+      </nav>
+
+      <section id="overview">
+        <h2>1. アプリ概要</h2>
+        <img src="images/main-screen.png" alt="勤務表メイン画面" />
+        <p>
+          「管理者支援システム Ver0.5」は、看護師などの勤務表作成を支援するローカルWebアプリです。
+          勤務を自動で完成させるソフトではなく、勤務記号や登録済みパターンを配置しながら、勤務表のたたき台を作るためのツールです。
+        </p>
+        <p>
+          勤務入力、希望入力、パターン管理、自動配置、自動調整、警告表示、評点、日別集計、個人集計、NGペア設定などを利用できます。
+          データはブラウザの localStorage に自動保存されます。
+        </p>
+      </section>
+
+      <section id="layout">
+        <h2>2. 画面構成</h2>
+        <img src="images/screen-layout.png" alt="画面構成" />
+        <ul>
+          <li>上部ヘッダー：アプリ名、評点、P値凡例、保存状態、月変更、シフト表クリア、初期化</li>
+          <li>勤務表エリア：行事予定、日付、曜日、スタッフ別勤務表、日別集計、警告行</li>
+          <li>勤務表操作エリア：自動調整、ハイライト色、勤務入力／希望入力の切り替え</li>
+          <li>勤務表下の設定エリア：パターン管理、スタッフ管理、NGペア</li>
+          <li>右側パネル：個人集計、ルール設定</li>
+        </ul>
+      </section>
+
+      <section id="shift-input">
+        <h2>3. 勤務入力モードの使い方</h2>
+        <img src="images/shift-input-mode.png" alt="勤務入力モード" />
+        <p>
+          「勤務入力」を選び、勤務セルをクリックすると勤務選択メニューが表示されます。
+          単独勤務として、空欄、日、遅、入、明、休、有、夏、冬を入力できます。
+        </p>
+        <p>
+          同じメニューから登録済みパターンも選べます。パターンを選ぶと、クリックしたスタッフ・クリックした日付を開始位置として配置されます。
+        </p>
+      </section>
+
+      <section id="request-input">
+        <h2>4. 希望入力モードの使い方</h2>
+        <img src="images/request-input-mode.png" alt="希望入力モード" />
+        <p>
+          「希望入力」を選び、勤務セルをクリックすると希望入力メニューが表示されます。
+          希望を削除、休、有、日、遅、入、明、日/遅、夏、冬を選べます。
+        </p>
+        <p>
+          希望が入っているセルは <code>*</code> 付きで表示されます。希望と違う勤務を入力しようとすると変更されません。
+          パターン配置でも、希望と合わないセルは上書きされません。
+        </p>
+      </section>
+
+      <section id="staff-power">
+        <h2>5. スタッフ名・P値の編集方法</h2>
+        <img src="images/staff-edit.png" alt="スタッフ編集" />
+        <p>
+          スタッフ名はスタッフ管理の「名前」ボタンから編集します。P値はスタッフ管理内のP欄で選択します。勤務表右端のP列は表示専用です。
+          P1は新人相当、P2は一人前相当、P3は中堅相当、P4は管理職相当です。
+        </p>
+      </section>
+
+      <section id="staff-add-delete">
+        <h2>6. スタッフ追加・削除の方法</h2>
+        <img src="images/staff-add-delete.png" alt="スタッフ追加削除" />
+        <p>
+          勤務表下の「スタッフ管理」で「＋ 追加」を押すと、氏名「新規スタッフ」、P値1、自動対象ONのスタッフが追加されます。
+          削除ボタンを押すと確認ダイアログが表示され、OKすると勤務データ、希望データ、NGペア設定からも削除されます。
+        </p>
+      </section>
+
+      <section id="auto-placement">
+        <h2>7. 自動配置の使い方</h2>
+        <img src="images/auto-placement.png" alt="自動配置" />
+        <p>
+          「自動配置」は、登録済みパターンを使い、勤務と希望が入っていない空欄セルを埋めます。
+          対象になるのは、スタッフ管理で「自動対象」がONのスタッフです。
+        </p>
+        <p>
+          パターン管理で「自動配置」にチェックが入っているパターンだけが使用されます。
+        </p>
+      </section>
+
+      <section id="auto-adjustment">
+        <h2>8. 自動調整の使い方</h2>
+        <img src="images/auto-adjustment.png" alt="自動調整" />
+        <p>
+          「自動調整」は、現在の勤務表をもとに、評点が上がる小さな変更を試す機能です。
+          スコアが改善する変更だけを採用します。希望入力があるセル、有休、夏休、冬休は変更しません。
+        </p>
+      </section>
+
+      <section id="patterns">
+        <h2>9. パターン管理の使い方</h2>
+        <img src="images/pattern-management.png" alt="パターン管理" />
+        <p>
+          パターン管理では、シフトパターンを追加・編集・削除できます。
+          初期パターンは、基本1、基本2、夜勤、遅出、2日勤、管理者です。
+          パターンには空欄も含めることができます。
+        </p>
+      </section>
+
+      <section id="staff-management">
+        <h2>10. スタッフ管理の使い方</h2>
+        <p>
+          スタッフ管理では、スタッフ追加、削除、自動対象のON/OFFを設定できます。
+          自動対象OFFのスタッフは自動配置・自動調整で変更されませんが、集計や警告には含まれます。
+        </p>
+      </section>
+
+      <section id="ng-pair">
+        <h2>11. NGペア設定の使い方</h2>
+        <img src="images/ng-pair.png" alt="NGペア設定" />
+        <p>
+          NGペアは、同じ勤務にしたくないスタッフの組み合わせを警告する機能です。
+          両方が同じ日に日勤、または両方が同じ日に夜勤入りの場合に警告します。
+          配置禁止ではありません。
+        </p>
+      </section>
+
+      <section id="day-notes">
+        <h2>12. 行事予定欄の使い方</h2>
+        <img src="images/day-notes.png" alt="行事予定欄" />
+        <p>
+          日付行の上にある行事予定欄をクリックすると、その日の祝祭日・行事予定を入力できます。
+          入力した内容は縦書きで表示され、自動保存されます。
+          行事予定はメモ機能であり、警告や評点には影響しません。
+        </p>
+      </section>
+
+      <section id="score">
+        <h2>13. 評点の見方</h2>
+        <img src="images/shift-score.png" alt="評点" />
+        <p>
+          評点は100点から減点する方式です。0点未満のマイナス点も表示されます。
+          警告件数、夜勤関連、公休や公平性、Power不足、NGペアなどが反映されます。
+        </p>
+        <p>
+          評点部分にカーソルを合わせる、またはクリック／タップすると、減点内訳が表示されます。
+          分類は、警告件数、夜勤関連、Power/フォロー体制、公休/公平性、NGペアです。
+        </p>
+
+      </section>
+
+      <section id="warnings">
+        <h2>14. 警告表示の見方</h2>
+        <img src="images/warnings.png" alt="警告表示" />
+        <p>
+          警告行には警告数に応じて <code>!</code>、<code>!!</code>、<code>!!!</code> が表示されます。
+          クリックすると、その日の警告詳細を確認できます。
+        </p>
+      </section>
+
+      <section id="boundary">
+        <h2>15. 月またぎ確認の見方</h2>
+        <img src="images/month-boundary.png" alt="月またぎ確認" />
+        <p>
+          月初や月末で前月・翌月の勤務が必要になる場合は、通常警告ではなく <code>↔</code> の月またぎ確認として表示されます。
+          月またぎ確認は評点の減点対象ではありません。
+        </p>
+      </section>
+
+      <section id="summary">
+        <h2>16. 日別集計・個人集計の見方</h2>
+        <img src="images/summary.png" alt="集計表示" />
+        <p>
+          日別集計には、日勤、深夜、準夜、遅出、Power、警告が表示されます。
+          個人集計には、公、日、遅、入、有、夏、冬が表示されます。
+          0の場合も0として表示されます。
+        </p>
+      </section>
+
+      <section id="rules">
+        <h2>17. ルール設定の使い方</h2>
+        <img src="images/rule-settings.png" alt="ルール設定" />
+        <p>
+          ルール設定では、日勤最低人数、日勤Power最低値、公休目標日数、連勤警告日数、遅出最大人数、
+          入最大人数、深夜最低人数、準夜最低人数を変更できます。変更は警告、集計色、評点に反映されます。
+        </p>
+      </section>
+
+      <section id="highlight">
+        <h2>18. ハイライト色設定の使い方</h2>
+        <img src="images/highlight-color.png" alt="ハイライト色設定" />
+        <p>
+          ハイライト色では、勤務表上でマウスを合わせた行・列の十字ハイライト色を変更できます。
+          変更した色は自動保存されます。
+        </p>
+      </section>
+
+      <section id="clear-reset">
+        <h2>19. シフト表クリアと初期化の違い</h2>
+        <img src="images/clear-reset.png" alt="クリアと初期化" />
+        <p>
+          シフト表クリアは、現在表示している月の勤務データだけを空欄にします。
+          希望、パターン、スタッフ、P値、NGペア、行事予定、ルール設定は残ります。
+        </p>
+        <p>
+          初期化は localStorage の保存データを削除し、初期状態に戻します。
+        </p>
+      </section>
+
+      <section id="storage">
+        <h2>20. localStorage保存について</h2>
+        <p>
+          このアプリは保存ボタンを使わず、操作時に自動保存します。
+          保存先は使用中のブラウザの localStorage です。
+          ブラウザや端末を変更すると保存データは共有されません。
+        </p>
+      </section>
+
+      <section id="notes">
+        <h2>21. 注意事項・免責</h2>
+        <p class="note">
+          このアプリは勤務表作成を支援するためのツールです。
+          警告や評点は確認を補助する表示であり、勤務表の内容を保証するものではありません。
+          最終的な勤務可否や運用ルールへの適合は、必ず利用者が確認してください。
+        </p>
+      </section>
+
+      <section>
+        <h2>実装済み機能一覧</h2>
+        <ul>
+          <li>月表示変更、勤務入力、希望入力、希望保護</li>
+          <li>勤務セルからのパターン配置、パターン追加・編集・削除</li>
+          <li>自動配置、自動調整、スタッフ追加・削除、自動対象設定</li>
+          <li>NGペア、行事予定、日別集計、個人集計、警告、月またぎ確認</li>
+          <li>評点、減点内訳、ルール設定、ハイライト色、自動保存</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>今後追加予定にできそうな機能一覧</h2>
+        <ul>
+          <li>Excel読込、CSV出力、印刷用レイアウト</li>
+          <li>クラウド保存、ログイン、複数端末同期</li>
+          <li>希望休一覧、行事予定に応じた基準変更</li>
+          <li>自動配置ロジックの高度化、夜勤セット作成の高度化</li>
+          <li>バックアップ・復元、スタッフ並び替え、勤務表コピー、出力機能</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>短い紹介文</h2>
+        <p>
+          「管理者支援システム」は、勤務表作成時の入力・確認・調整を支援するWebアプリです。
+          勤務記号やシフトパターンを配置しながら、希望勤務、警告、集計、評点を確認できます。
+          自動配置と自動調整により、空欄を埋めるたたき台作成やスコア改善を補助し、最終確認は管理者が行えるよう設計されています。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

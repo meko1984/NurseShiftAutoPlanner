@@ -20,17 +20,17 @@
               aria-expanded="false"
               aria-controls="shift-score-panel"
             >
-              シフトスコア：--点
+              評点：--点
             </button>
             <div id="shift-score-panel" class="shift-score-panel" hidden></div>
           </div>
-          <p class="power-legend">
-            P1=新人相当 / P2=一人前相当 / P3=中堅相当 / P4=管理職相当
-          </p>
         </div>
       </div>
 
       <div class="header-actions">
+        <a class="manual-link" href="docs/manual.html" target="_blank" rel="noopener">
+          使い方
+        </a>
         <span id="save-status" class="save-status" role="status" aria-live="polite">
           ✓ 保存済み
         </span>
@@ -88,18 +88,23 @@
           </table>
         </div>
 
-        <div class="legend table-legend" aria-label="勤務記号の凡例">
-          <span><i class="legend-chip shift-day">日</i>日勤</span>
-          <span><i class="legend-chip shift-late">遅</i>遅出</span>
-          <span><i class="legend-chip shift-night">入</i>夜勤入</span>
-          <span><i class="legend-chip shift-after">明</i>夜勤明</span>
-          <span><i class="legend-chip shift-off">休</i>公休</span>
-          <span><i class="legend-chip shift-paid">有</i>有休</span>
-          <span><i class="legend-chip shift-summer">夏</i>夏休</span>
-          <span><i class="legend-chip shift-winter">冬</i>冬休</span>
-          <span><i class="legend-chip request-legend">*</i>希望</span>
-          <span><i class="legend-chip warning-legend">!</i>警告</span>
-          <span><i class="legend-chip boundary-legend">↔</i>月またぎ確認</span>
+        <div class="table-legend" aria-label="勤務記号とP値の凡例">
+          <div class="legend legend-shifts">
+            <span><i class="legend-chip shift-day">日</i>日勤</span>
+            <span><i class="legend-chip shift-late">遅</i>遅出</span>
+            <span><i class="legend-chip shift-night">入</i>夜勤入</span>
+            <span><i class="legend-chip shift-after">明</i>夜勤明</span>
+            <span><i class="legend-chip shift-off">休</i>公休</span>
+            <span><i class="legend-chip shift-paid">有</i>有休</span>
+            <span><i class="legend-chip shift-summer">夏</i>夏休</span>
+            <span><i class="legend-chip shift-winter">冬</i>冬休</span>
+            <span><i class="legend-chip request-legend">*</i>希望</span>
+            <span><i class="legend-chip warning-legend">!</i>警告</span>
+            <span><i class="legend-chip boundary-legend">↔</i>月またぎ確認</span>
+          </div>
+          <p class="power-legend">
+            P値：P1=新人相当 / P2=一人前相当 / P3=中堅相当 / P4=管理職相当
+          </p>
         </div>
 
         <div class="settings-grid" aria-label="勤務表下の設定">
