@@ -505,6 +505,12 @@ select {
   font-weight: 800;
 }
 
+.shift-mark.shift-custom {
+  color: #173326;
+  background: var(--shift-type-color, #e6eee9);
+  border-color: color-mix(in srgb, var(--shift-type-color, #e6eee9) 65%, #567064);
+}
+
 .legend-chip {
   width: 19px;
   height: 19px;
@@ -1023,7 +1029,7 @@ thead .power-column {
 
 .staff-setting-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  grid-template-columns: minmax(90px, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   min-height: 31px;
@@ -1033,6 +1039,35 @@ thead .power-column {
   background: #fbfcfb;
   font-size: 10px;
   font-weight: 800;
+}
+
+.staff-setting-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(58px, 1fr));
+  gap: 5px;
+}
+
+.staff-limit-setting {
+  display: grid !important;
+  gap: 2px !important;
+  font-size: 8px;
+}
+
+.staff-limit-setting input {
+  width: 100%;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 10px;
+}
+
+.staff-auto-settings {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .staff-setting-item > span {
@@ -1112,6 +1147,56 @@ thead .power-column {
   background: var(--paper);
   font-size: 11px;
   font-weight: 800;
+}
+
+.shift-type-help {
+  margin: 0;
+  padding: 0 10px 7px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.shift-type-list {
+  display: grid;
+  gap: 5px;
+  padding: 0 10px 10px;
+}
+
+.shift-type-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfb;
+  font-size: 9px;
+}
+
+.shift-type-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-type-item-actions { display: flex; gap: 4px; }
+.shift-type-item-actions button { min-height: 23px; padding: 0 5px; font-size: 8px; }
+
+.shift-type-dialog { width: min(720px, calc(100vw - 24px)); }
+.shift-type-dialog::backdrop { background: rgba(15, 28, 21, 0.45); }
+.shift-type-dialog form { display: grid; gap: 14px; }
+.shift-type-basic-fields,
+.shift-type-rule-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.shift-type-dialog select { min-height: 36px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.shift-type-flags { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.shift-type-flags legend { padding: 0 5px; font-size: 11px; font-weight: 800; }
+.shift-type-flags label { display: flex; align-items: center; gap: 5px; font-size: 10px; }
+
+@media (max-width: 700px) {
+  .shift-type-basic-fields,
+  .shift-type-rule-fields,
+  .shift-type-flags { grid-template-columns: 1fr 1fr; }
 }
 
 .pattern-list {
@@ -1655,7 +1740,8 @@ thead .power-column {
 }
 
 .pattern-dialog,
-.staff-name-dialog {
+.staff-name-dialog,
+.shift-type-dialog {
   width: min(440px, calc(100% - 32px));
   padding: 0;
   border: 1px solid var(--line);
@@ -1665,14 +1751,20 @@ thead .power-column {
 }
 
 .pattern-dialog::backdrop,
-.staff-name-dialog::backdrop {
+.staff-name-dialog::backdrop,
+.shift-type-dialog::backdrop {
   background: rgba(17, 27, 22, 0.4);
   backdrop-filter: blur(2px);
 }
 
 .pattern-dialog form,
-.staff-name-dialog form {
+.staff-name-dialog form,
+.shift-type-dialog form {
   padding: 20px;
+}
+
+.shift-type-dialog {
+  width: min(720px, calc(100% - 32px));
 }
 
 .warning-dialog::backdrop {

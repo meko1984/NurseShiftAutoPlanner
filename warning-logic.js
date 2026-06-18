@@ -5,7 +5,6 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   root.AutoShiftWarnings = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function createWarningLogic() {
-  const WORK_SHIFTS = new Set(["日", "遅", "入", "明"]);
   const DEFAULT_RULES = {
     minDayStaff: 3,
     minDayPower: 7,
@@ -58,21 +57,30 @@
     }));
   }
 
+  function getShiftType(data, symbol) {
+    return data.shiftTypes?.find((type) => type.symbol === symbol) ?? null;
+  }
+
+  function hasFlag(data, symbol, flag) {
+    return Boolean(getShiftType(data, symbol)?.[flag]);
+  }
+
   function getDailyTotals(assignments) {
-    const dayStaff = assignments.filter(({ shift }) => shift === "日");
+    const data = assignments[0]?.data;
+    const dayStaff = assignments.filter(({ shift, shiftType }) => shiftType?.countsAsDay);
     return {
       dayStaff,
       dayCount: dayStaff.length,
-      dayPower: dayStaff.reduce((sum, { staff }) => sum + staff.power, 0),
-      nightStaff: assignments.filter(({ shift }) => shift === "入"),
-      afterCount: assignments.filter(({ shift }) => shift === "明").length,
-      lateCount: assignments.filter(({ shift }) => shift === "遅").length,
+      dayPower: assignments.filter(({ shiftType }) => shiftType?.countsForPower).reduce((sum, { staff }) => sum + staff.power, 0),
+      nightStaff: assignments.filter(({ shiftType }) => shiftType?.countsAsEvening),
+      afterCount: assignments.filter(({ shiftType }) => shiftType?.countsAsDeepNight).length,
+      lateCount: assignments.filter(({ shiftType }) => shiftType?.countsAsLate).length,
     };
   }
 
   function hasConsecutiveWorkDays(data, staffId, year, month, day, length) {
     for (let offset = 0; offset < length; offset += 1) {
-      if (!WORK_SHIFTS.has(getShift(data, staffId, year, month, day - offset))) {
+      if (!hasFlag(data, getShift(data, staffId, year, month, day - offset), "countsForConsecutive")) {
         return false;
       }
     }
@@ -115,12 +123,12 @@
 
       const firstShift = getShift(data, firstId, year, month, day);
       const secondShift = getShift(data, secondId, year, month, day);
-      if (firstShift === "日" && secondShift === "日") {
+      if (hasFlag(data, firstShift, "countsAsDay") && hasFlag(data, secondShift, "countsAsDay")) {
         warnings.push(
           `NGペア：${first.name}さんと${second.name}さんが同じ日勤です。`,
         );
       }
-      if (firstShift === "入" && secondShift === "入") {
+      if (hasFlag(data, firstShift, "countsAsEvening") && hasFlag(data, secondShift, "countsAsEvening")) {
         warnings.push(
           `NGペア：${first.name}さんと${second.name}さんが同じ夜勤入りです。`,
         );
@@ -133,7 +141,10 @@
   function getWarnings(data, year, month, day) {
     const warnings = [];
     const rules = getWarningRules(data);
-    const assignments = getDailyAssignments(data, year, month, day);
+    const assignments = getDailyAssignments(data, year, month, day).map((assignment) => ({
+      ...assignment,
+      shiftType: getShiftType(data, assignment.shift),
+    }));
     const totals = getDailyTotals(assignments);
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const canCheckNextDay = day < daysInMonth;
@@ -166,20 +177,17 @@
       warnings.push(`深夜不足：明が${totals.afterCount}人です。`);
     }
 
-    assignments.forEach(({ staff, shift }) => {
+    assignments.forEach(({ staff, shift, shiftType }) => {
       const nextShift = getShift(data, staff.id, year, month, day + 1);
 
-      if (canCheckNextDay && shift === "入" && nextShift !== "明") {
-        warnings.push(`${staff.name}さん：入の翌日が明ではありません。`);
+      if (canCheckNextDay && shiftType?.requiredNext && nextShift !== shiftType.requiredNext) {
+        warnings.push(`${staff.name}さん：${shiftType.name}の翌日が${getShiftType(data, shiftType.requiredNext)?.name ?? shiftType.requiredNext}ではありません。`);
       }
-      if (canCheckNextDay && shift === "明" && nextShift !== "休") {
-        warnings.push(`${staff.name}さん：明の翌日が休ではありません。`);
-      }
-      if (shift === "遅" && (nextShift === "日" || nextShift === "明")) {
-        warnings.push(`${staff.name}さん：遅出の翌日が日または明になっています。`);
+      if (canCheckNextDay && shiftType?.forbiddenNext?.includes(nextShift)) {
+        warnings.push(`${staff.name}さん：${shiftType.name}の翌日に禁止勤務（${getShiftType(data, nextShift)?.name ?? nextShift}）があります。`);
       }
       if (
-        WORK_SHIFTS.has(shift) &&
+        shiftType?.countsForConsecutive &&
         hasConsecutiveWorkDays(data, staff.id, year, month, day, rules.consecutiveWorkDays)
       ) {
         warnings.push(`${staff.name}さん：${rules.consecutiveWorkDays}連勤以上になっています。`);
@@ -225,6 +233,43 @@
     }
 
     warnings.push(...getNgPairWarnings(data, year, month, day));
+
+    if (day === daysInMonth) {
+      data.staff.forEach((staff) => {
+        const limits = staff.limits ?? {};
+        const totals = { night: 0, late: 0, long: 0, evening: 0, deepNight: 0 };
+        for (let targetDay = 1; targetDay <= daysInMonth; targetDay += 1) {
+          const type = getShiftType(data, getShift(data, staff.id, year, month, targetDay));
+          if (!type) continue;
+          if (type.countsAsEvening) { totals.night += 1; totals.evening += 1; }
+          if (type.countsAsDeepNight) totals.deepNight += 1;
+          if (type.countsAsLate) totals.late += 1;
+          if (type.category === "その他勤務") totals.long += 1;
+        }
+        [["夜勤", "night"], ["遅出", "late"], ["ロング勤務", "long"], ["入", "evening"], ["明", "deepNight"]]
+          .forEach(([label, key]) => {
+            const limit = Number(limits[key]);
+            if (Number.isFinite(limit) && totals[key] > limit) {
+              warnings.push(`${staff.name}さん：${label}${totals[key]}回で、個人上限${limit}回を超えています。`);
+            }
+          });
+        const consecutiveLimit = Number(limits.consecutive);
+        if (Number.isFinite(consecutiveLimit)) {
+          let current = 0;
+          let longest = 0;
+          for (let targetDay = 1; targetDay <= daysInMonth; targetDay += 1) {
+            const shift = getShift(data, staff.id, year, month, targetDay);
+            if (hasFlag(data, shift, "countsForConsecutive")) {
+              current += 1;
+              longest = Math.max(longest, current);
+            } else current = 0;
+          }
+          if (longest > consecutiveLimit) {
+            warnings.push(`${staff.name}さん：最大${longest}連勤で、個人上限${consecutiveLimit}日を超えています。`);
+          }
+        }
+      });
+    }
     return warnings;
   }
 

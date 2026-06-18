@@ -1,11 +1,22 @@
 "use strict";
 
 const STORAGE_KEY = "autoShiftTool.data";
-const DATA_VERSION = 5;
-const SHIFT_OPTIONS = ["", "日", "遅", "入", "明", "休", "有", "夏", "冬"];
-const EDITABLE_SHIFTS = SHIFT_OPTIONS.filter(Boolean);
-const PATTERN_SHIFT_OPTIONS = SHIFT_OPTIONS;
-const REQUEST_OPTIONS = ["", "休", "有", "日", "遅", "入", "明", "日/遅", "夏", "冬"];
+const DATA_VERSION = 6;
+const SHIFT_TYPE_CATEGORIES = ["日勤", "遅出", "準夜", "深夜", "休み", "有休", "その他勤務", "その他休み"];
+const SHIFT_TYPE_FLAGS = [
+  "isWork", "isRest", "countsAsDay", "countsAsLate", "countsAsEvening",
+  "countsAsDeepNight", "countsAsPublicHoliday", "countsAsPaid", "countsAsSummer",
+  "countsAsWinter", "countsForPower", "countsForConsecutive", "useForAuto",
+  "blockedBeforeRequestedOff",
+];
+const DEFAULT_STAFF_LIMITS = {
+  night: 31,
+  late: 31,
+  long: 31,
+  evening: 31,
+  deepNight: 31,
+  consecutive: 6,
+};
 const REQUEST_LABELS = {
   "": "希望を削除",
   休: "休*",
@@ -28,6 +39,25 @@ const SHIFT_CLASS = {
   夏: "shift-summer",
   冬: "shift-winter",
 };
+function createDefaultShiftTypes() {
+  const base = {
+    isWork: false, isRest: false, countsAsDay: false, countsAsLate: false,
+    countsAsEvening: false, countsAsDeepNight: false, countsAsPublicHoliday: false,
+    countsAsPaid: false, countsAsSummer: false, countsAsWinter: false,
+    countsForPower: false, countsForConsecutive: false, useForAuto: true,
+    blockedBeforeRequestedOff: false, requiredNext: "", forbiddenNext: [],
+  };
+  return [
+    { ...base, symbol: "日", name: "日勤", category: "日勤", color: "#dcefe5", isWork: true, countsAsDay: true, countsForPower: true, countsForConsecutive: true },
+    { ...base, symbol: "遅", name: "遅出", category: "遅出", color: "#ffe6c7", isWork: true, countsAsLate: true, countsForConsecutive: true, forbiddenNext: ["日", "明"] },
+    { ...base, symbol: "入", name: "準夜", category: "準夜", color: "#d8e8ff", isWork: true, countsAsEvening: true, countsForConsecutive: true, requiredNext: "明" },
+    { ...base, symbol: "明", name: "深夜", category: "深夜", color: "#d9f1f5", isWork: true, countsAsDeepNight: true, countsForConsecutive: true, requiredNext: "休" },
+    { ...base, symbol: "休", name: "公休", category: "休み", color: "#eeeeee", isRest: true, countsAsPublicHoliday: true },
+    { ...base, symbol: "有", name: "有休", category: "有休", color: "#f7e4ef", isRest: true, countsAsPaid: true },
+    { ...base, symbol: "夏", name: "夏休", category: "その他休み", color: "#fff0b8", isRest: true, countsAsSummer: true },
+    { ...base, symbol: "冬", name: "冬休", category: "その他休み", color: "#e4e8ff", isRest: true, countsAsWinter: true },
+  ];
+}
 const AUTO_PLACEMENT_DEFAULTS = {
   targetDayStaff: 3,
   maxNightStaff: 1,
@@ -84,6 +114,7 @@ const SCORE_RULES = {
   juniorNightOverlap: 3,
   nightStaffExcess: 2,
   lateStaffExcess: 2,
+  staffLimitExceeded: 3,
 };
 
 function createInitialData() {
@@ -106,7 +137,14 @@ function createInitialData() {
       { id: "I", name: "I", power: 1 },
       { id: "J", name: "J", power: 1 },
       { id: "K", name: "K", power: 1 },
-    ].map((staff) => ({ ...staff, autoTarget: true })),
+    ].map((staff) => ({
+      ...staff,
+      autoTarget: true,
+      autoPlacementTarget: true,
+      autoAdjustmentTarget: true,
+      limits: { ...DEFAULT_STAFF_LIMITS },
+    })),
+    shiftTypes: createDefaultShiftTypes(),
     schedules: {},
     requests: {},
     dayNotes: {},
@@ -162,9 +200,49 @@ function normalizeNgPairs(pairs, staff) {
   return normalized;
 }
 
+function normalizeShiftTypes(savedTypes) {
+  const defaults = createDefaultShiftTypes();
+  const source = Array.isArray(savedTypes) && savedTypes.length ? savedTypes : defaults;
+  const seen = new Set();
+  return source
+    .filter((item) => item && typeof item.symbol === "string")
+    .map((item) => {
+      const symbol = item.symbol.trim().slice(0, 4);
+      if (!symbol || seen.has(symbol)) return null;
+      seen.add(symbol);
+      const defaultType = defaults.find((type) => type.symbol === symbol) ?? {};
+      const normalized = {
+        ...defaultType,
+        symbol,
+        name: String(item.name ?? defaultType.name ?? symbol).trim() || symbol,
+        category: SHIFT_TYPE_CATEGORIES.includes(item.category) ? item.category : (defaultType.category ?? "その他勤務"),
+        color: /^#[0-9a-f]{6}$/i.test(item.color) ? item.color : (defaultType.color ?? "#e6eee9"),
+        requiredNext: typeof item.requiredNext === "string" ? item.requiredNext : (defaultType.requiredNext ?? ""),
+        forbiddenNext: Array.isArray(item.forbiddenNext) ? item.forbiddenNext.filter((value) => typeof value === "string") : (defaultType.forbiddenNext ?? []),
+      };
+      SHIFT_TYPE_FLAGS.forEach((flag) => {
+        normalized[flag] = typeof item[flag] === "boolean" ? item[flag] : Boolean(defaultType[flag]);
+      });
+      return normalized;
+    })
+    .filter(Boolean);
+}
+
+function normalizeStaffLimits(savedLimits = {}) {
+  return Object.fromEntries(
+    Object.entries(DEFAULT_STAFF_LIMITS).map(([key, fallback]) => {
+      const value = Number(savedLimits[key]);
+      return [key, Number.isFinite(value) ? Math.max(0, Math.min(31, value)) : fallback];
+    }),
+  );
+}
+
 function normalizeData(saved) {
   const initial = createInitialData();
   if (!saved || typeof saved !== "object") return initial;
+
+  const shiftTypes = normalizeShiftTypes(saved.shiftTypes);
+  const validShiftSymbols = new Set(shiftTypes.map((type) => type.symbol));
 
   const staff = Array.isArray(saved.staff)
     ? saved.staff
@@ -174,6 +252,9 @@ function normalizeData(saved) {
           name: String(item.name ?? item.id),
           power: [1, 2, 3, 4].includes(Number(item.power)) ? Number(item.power) : 1,
           autoTarget: item.autoTarget !== false,
+          autoPlacementTarget: item.autoPlacementTarget ?? item.autoTarget ?? true,
+          autoAdjustmentTarget: item.autoAdjustmentTarget ?? item.autoTarget ?? true,
+          limits: normalizeStaffLimits(item.limits),
         }))
     : initial.staff;
 
@@ -184,7 +265,7 @@ function normalizeData(saved) {
           id: item.id,
           name: String(item.name ?? "名称未設定"),
           shifts: Array.isArray(item.shifts)
-            ? item.shifts.filter((shift) => PATTERN_SHIFT_OPTIONS.includes(shift))
+            ? item.shifts.filter((shift) => shift === "" || validShiftSymbols.has(shift))
             : [],
           useForAuto: item.useForAuto !== false,
         }))
@@ -209,6 +290,7 @@ function normalizeData(saved) {
       month: Number.isInteger(month) && month >= 0 && month <= 11 ? month : initial.display.month,
     },
     staff: staff.length ? staff : initial.staff,
+    shiftTypes,
     schedules:
       saved.schedules && typeof saved.schedules === "object" ? saved.schedules : {},
     requests:
@@ -264,6 +346,7 @@ const uiState = {
   editingCell: null,
   editingStaffId: null,
   editingPatternId: null,
+  editingShiftTypeSymbol: null,
   patternDraft: [],
   inputMode: "shift",
   scorePanelPinned: false,
@@ -286,6 +369,9 @@ const elements = {
   addStaff: document.querySelector("#add-staff"),
   staffSettingsList: document.querySelector("#staff-settings-list"),
   ruleSettings: document.querySelector("#rule-settings"),
+  shiftTypeLegend: document.querySelector("#shift-type-legend"),
+  shiftTypeList: document.querySelector("#shift-type-list"),
+  addShiftType: document.querySelector("#add-shift-type"),
   patternList: document.querySelector("#pattern-list"),
   ngPairFirst: document.querySelector("#ng-pair-first"),
   ngPairSecond: document.querySelector("#ng-pair-second"),
@@ -325,6 +411,18 @@ const elements = {
   patternSequence: document.querySelector("#pattern-sequence"),
   shiftAddButtons: document.querySelector("#shift-add-buttons"),
   patternEditorError: document.querySelector("#pattern-editor-error"),
+  shiftTypeDialog: document.querySelector("#shift-type-dialog"),
+  shiftTypeForm: document.querySelector("#shift-type-form"),
+  shiftTypeDialogTitle: document.querySelector("#shift-type-dialog-title"),
+  shiftTypeSymbol: document.querySelector("#shift-type-symbol"),
+  shiftTypeName: document.querySelector("#shift-type-name"),
+  shiftTypeCategory: document.querySelector("#shift-type-category"),
+  shiftTypeColor: document.querySelector("#shift-type-color"),
+  shiftTypeRequiredNext: document.querySelector("#shift-type-required-next"),
+  shiftTypeForbiddenNext: document.querySelector("#shift-type-forbidden-next"),
+  shiftTypeError: document.querySelector("#shift-type-error"),
+  shiftTypeClose: document.querySelector("#shift-type-close"),
+  shiftTypeCancel: document.querySelector("#shift-type-cancel"),
 };
 
 function escapeHtml(value) {
@@ -366,6 +464,29 @@ function getWarningRules() {
     ...DEFAULT_WARNING_RULES,
     ...(appData.settings.warningRules ?? {}),
   };
+}
+
+function getShiftTypes() {
+  return appData.shiftTypes ?? [];
+}
+
+function getShiftType(symbol) {
+  return getShiftTypes().find((type) => type.symbol === symbol) ?? null;
+}
+
+function getShiftOptions({ includeBlank = true, autoOnly = false } = {}) {
+  const symbols = getShiftTypes()
+    .filter((type) => !autoOnly || type.useForAuto !== false)
+    .map((type) => type.symbol);
+  return includeBlank ? ["", ...symbols] : symbols;
+}
+
+function isShiftTypeFlag(symbol, flag) {
+  return Boolean(getShiftType(symbol)?.[flag]);
+}
+
+function getShiftStyle(type) {
+  return type ? `style="--shift-type-color:${escapeHtml(type.color)};background-color:${escapeHtml(type.color)}"` : "";
 }
 
 function getSelectedPattern() {
@@ -428,12 +549,13 @@ function requestAllowsShift(request, shift) {
 }
 
 function getRequestLabel(request) {
-  return REQUEST_LABELS[request] ?? `希望${request}`;
+  return REQUEST_LABELS[request] ?? `${getShiftType(request)?.name ?? request}*`;
 }
 
 function createShiftMark(shift) {
   if (!shift) return "";
-  return `<span class="shift-mark ${SHIFT_CLASS[shift]}">${shift}</span>`;
+  const type = getShiftType(shift);
+  return `<span class="shift-mark ${SHIFT_CLASS[shift] ?? "shift-custom"}" ${getShiftStyle(type)} title="${escapeHtml(type?.name ?? shift)}">${escapeHtml(shift)}</span>`;
 }
 
 function createPatternShiftMark(shift) {
@@ -449,9 +571,9 @@ function createCellDisplay(shift, request) {
     return `<span class="request-only-mark">日/遅<span class="request-star">*</span></span>`;
   }
 
-  return `<span class="shift-mark ${SHIFT_CLASS[value] ?? ""} ${
+  return `<span class="shift-mark ${SHIFT_CLASS[value] ?? "shift-custom"} ${
     !shift && request ? "request-only-mark" : ""
-  }">${value}${request ? '<span class="request-star">*</span>' : ""}</span>`;
+  }" ${getShiftStyle(getShiftType(value))}>${escapeHtml(value)}${request ? '<span class="request-star">*</span>' : ""}</span>`;
 }
 
 function getDayType(day) {
@@ -594,13 +716,13 @@ function getDailyTotals(day) {
   const totals = { day: 0, deepNight: 0, evening: 0, late: 0, power: 0 };
   appData.staff.forEach((staff) => {
     const shift = getShift(staff.id, day);
-    if (shift === "日") {
-      totals.day += 1;
-      totals.power += staff.power;
-    }
-    if (shift === "明") totals.deepNight += 1;
-    if (shift === "入") totals.evening += 1;
-    if (shift === "遅") totals.late += 1;
+    const type = getShiftType(shift);
+    if (!type) return;
+    if (type.countsAsDay) totals.day += 1;
+    if (type.countsForPower) totals.power += staff.power;
+    if (type.countsAsDeepNight) totals.deepNight += 1;
+    if (type.countsAsEvening) totals.evening += 1;
+    if (type.countsAsLate) totals.late += 1;
   });
   return totals;
 }
@@ -620,19 +742,15 @@ function getMonthBoundaryNotes(day) {
 
   appData.staff.forEach((staff) => {
     const shift = getShift(staff.id, day);
-    if (day === 1 && shift === "明") {
+    const type = getShiftType(shift);
+    if (day === 1 && type?.countsAsDeepNight) {
       notes.push(
-        `${staff.name}さん：1日が明です。前月末の入を確認してください。`,
+        `${staff.name}さん：1日が${type.name}です。前月末の勤務を確認してください。`,
       );
     }
-    if (day === daysInMonth && shift === "入") {
+    if (day === daysInMonth && type?.requiredNext) {
       notes.push(
-        `${staff.name}さん：月末が入です。翌月1日の明を確認してください。`,
-      );
-    }
-    if (day === daysInMonth && shift === "明") {
-      notes.push(
-        `${staff.name}さん：月末が明です。翌月1日の休を確認してください。`,
+        `${staff.name}さん：月末が${type.name}です。翌月1日の${getShiftType(type.requiredNext)?.name ?? type.requiredNext}を確認してください。`,
       );
     }
   });
@@ -641,12 +759,31 @@ function getMonthBoundaryNotes(day) {
 }
 
 function getStaffTotals(staffId) {
-  const totals = { publicHoliday: 0, 日: 0, 遅: 0, 入: 0, 有: 0, 夏: 0, 冬: 0 };
+  const totals = {
+    publicHoliday: 0, day: 0, late: 0, evening: 0, deepNight: 0,
+    paid: 0, summer: 0, winter: 0, long: 0,
+    日: 0, 遅: 0, 入: 0, 有: 0, 夏: 0, 冬: 0,
+  };
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
     const shift = getShift(staffId, day);
-    if (shift === "休") totals.publicHoliday += 1;
-    if (Object.hasOwn(totals, shift)) totals[shift] += 1;
+    const type = getShiftType(shift);
+    if (!type) continue;
+    if (type.countsAsPublicHoliday) totals.publicHoliday += 1;
+    if (type.countsAsDay) totals.day += 1;
+    if (type.countsAsLate) totals.late += 1;
+    if (type.countsAsEvening) totals.evening += 1;
+    if (type.countsAsDeepNight) totals.deepNight += 1;
+    if (type.countsAsPaid) totals.paid += 1;
+    if (type.countsAsSummer) totals.summer += 1;
+    if (type.countsAsWinter) totals.winter += 1;
+    if (type.category === "その他勤務") totals.long += 1;
   }
+  totals.日 = totals.day;
+  totals.遅 = totals.late;
+  totals.入 = totals.evening;
+  totals.有 = totals.paid;
+  totals.夏 = totals.summer;
+  totals.冬 = totals.winter;
   return totals;
 }
 
@@ -668,10 +805,48 @@ function getStaffBalancePenalty() {
   return (daySpread ** 2 + lateSpread ** 2 + nightSpread ** 2 + offSpread ** 2) * weight;
 }
 
+function getStaffLimitViolations(staff) {
+  const totals = getStaffTotals(staff.id);
+  const limits = staff.limits ?? DEFAULT_STAFF_LIMITS;
+  const items = [
+    ["夜勤", totals.evening, limits.night],
+    ["遅出", totals.late, limits.late],
+    ["ロング勤務", totals.long, limits.long],
+    ["入", totals.evening, limits.evening],
+    ["明", totals.deepNight, limits.deepNight],
+  ];
+  const violations = items
+    .filter(([, count, limit]) => Number.isFinite(limit) && count > limit)
+    .map(([label, count, limit]) => ({ label, count, limit }));
+  let longest = 0;
+  let current = 0;
+  for (let day = 1; day <= getDaysInMonth(); day += 1) {
+    if (isShiftTypeFlag(getShift(staff.id, day), "countsForConsecutive")) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else current = 0;
+  }
+  if (longest > limits.consecutive) {
+    violations.push({ label: "連勤", count: longest, limit: limits.consecutive });
+  }
+  return violations;
+}
+
+function patternExceedsStaffLimits(staffId, startDay, pattern) {
+  const staff = appData.staff.find((item) => item.id === staffId);
+  if (!staff) return true;
+  const getExcess = () => getStaffLimitViolations(staff)
+    .reduce((sum, item) => sum + Math.max(0, item.count - item.limit), 0);
+  const beforeExcess = getExcess();
+  pattern.shifts.forEach((shift, index) => setShift(staffId, startDay + index, shift));
+  const afterExcess = getExcess();
+  pattern.shifts.forEach((shift, index) => setShift(staffId, startDay + index, ""));
+  return afterExcess > beforeExcess;
+}
+
 function hasConsecutiveWorkDays(staffId, day, length) {
-  const workShifts = new Set(["日", "遅", "入", "明"]);
   for (let offset = 0; offset < length; offset += 1) {
-    if (!workShifts.has(getShift(staffId, day - offset))) return false;
+    if (!isShiftTypeFlag(getShift(staffId, day - offset), "countsForConsecutive")) return false;
   }
   return true;
 }
@@ -692,11 +867,11 @@ function getScoreRuleViolations(day) {
     nightStaffExcess: 0,
     lateStaffExcess: 0,
   };
-  const dayStaff = appData.staff.filter((staff) => getShift(staff.id, day) === "日");
-  const nightStaff = appData.staff.filter((staff) => getShift(staff.id, day) === "入");
+  const dayStaff = appData.staff.filter((staff) => isShiftTypeFlag(getShift(staff.id, day), "countsAsDay"));
+  const nightStaff = appData.staff.filter((staff) => isShiftTypeFlag(getShift(staff.id, day), "countsAsEvening"));
   const seniorNightCount = nightStaff.filter((staff) => staff.power >= 2).length;
   const juniorNightCount = nightStaff.filter((staff) => staff.power === 1).length;
-  const lateCount = appData.staff.filter((staff) => getShift(staff.id, day) === "遅").length;
+  const lateCount = appData.staff.filter((staff) => isShiftTypeFlag(getShift(staff.id, day), "countsAsLate")).length;
 
   if (!dayStaff.some((staff) => staff.power === 2 || staff.power === 3)) {
     violations.middleStaffShortage += 1;
@@ -719,13 +894,12 @@ function getScoreRuleViolations(day) {
     const nextShift = getShift(staff.id, day + 1);
     const canCheckNextDay = day < getDaysInMonth();
 
-    if (canCheckNextDay && shift === "入" && nextShift !== "明") {
-      violations.nightToAfter += 1;
+    const type = getShiftType(shift);
+    if (canCheckNextDay && type?.requiredNext && nextShift !== type.requiredNext) {
+      if (type.countsAsEvening) violations.nightToAfter += 1;
+      else if (type.countsAsDeepNight) violations.afterToOff += 1;
     }
-    if (canCheckNextDay && shift === "明" && nextShift !== "休") {
-      violations.afterToOff += 1;
-    }
-    if (shift === "遅" && (nextShift === "日" || nextShift === "明")) {
+    if (canCheckNextDay && type?.forbiddenNext?.includes(nextShift)) {
       violations.lateNextDay += 1;
     }
     if (hasConsecutiveWorkDays(staff.id, day, rules.consecutiveWorkDays)) {
@@ -736,8 +910,8 @@ function getScoreRuleViolations(day) {
   appData.ngPairs.forEach(([firstId, secondId]) => {
     const firstShift = getShift(firstId, day);
     const secondShift = getShift(secondId, day);
-    if (firstShift === "入" && secondShift === "入") violations.ngPairNight += 1;
-    if (firstShift === "日" && secondShift === "日") violations.ngPairDay += 1;
+    if (isShiftTypeFlag(firstShift, "countsAsEvening") && isShiftTypeFlag(secondShift, "countsAsEvening")) violations.ngPairNight += 1;
+    if (isShiftTypeFlag(firstShift, "countsAsDay") && isShiftTypeFlag(secondShift, "countsAsDay")) violations.ngPairDay += 1;
   });
 
   return violations;
@@ -789,6 +963,7 @@ function calculateShiftScore() {
     publicHolidayMismatch: 0,
     dayCountImbalance: 0,
     nightCountImbalance: 0,
+    staffLimitExceeded: 0,
   };
 
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
@@ -821,6 +996,7 @@ function calculateShiftScore() {
     if (totals.publicHoliday !== rules.targetPublicHoliday) counts.publicHolidayMismatch += 1;
     dayCounts.push(totals.日);
     nightCounts.push(totals.入);
+    counts.staffLimitExceeded += getStaffLimitViolations(staff).length;
   });
 
   if (getCountSpread(dayCounts) >= 4) counts.dayCountImbalance = 1;
@@ -881,6 +1057,7 @@ function calculateShiftScore() {
         SCORE_RULES.nightCountImbalance,
         "あり",
       ),
+      createScoreItem("スタッフ別上限超過", counts.staffLimitExceeded, SCORE_RULES.staffLimitExceeded),
     ]),
     createScoreCategory("NGペア", [
       createScoreItem("NGペア日勤被り", counts.ngPairDay, SCORE_RULES.ngPairDay),
@@ -1082,7 +1259,7 @@ function renderNgPairs() {
 
 function renderCellEditorOptions() {
   if (uiState.inputMode === "request") {
-    const requestOptions = REQUEST_OPTIONS.map((request) => {
+    const requestOptions = ["", ...getShiftOptions({ includeBlank: false }), "日/遅"].map((request) => {
       const selected =
         uiState.editingCell &&
         getRequest(uiState.editingCell.staffId, uiState.editingCell.day) === request;
@@ -1106,7 +1283,7 @@ function renderCellEditorOptions() {
     return;
   }
 
-  const shiftOptions = SHIFT_OPTIONS.map((shift) => {
+  const shiftOptions = getShiftOptions().map((shift) => {
     const selected =
       uiState.editingCell &&
       getShift(uiState.editingCell.staffId, uiState.editingCell.day) === shift;
@@ -1162,6 +1339,12 @@ function renderPatternDraft() {
     : '<span class="sequence-empty">勤務記号を追加してください</span>';
 }
 
+function renderPatternShiftButtons() {
+  elements.shiftAddButtons.innerHTML = getShiftOptions().map(
+    (shift) => `<button class="shift-add-button" type="button" data-add-shift="${escapeHtml(shift)}">${createPatternShiftMark(shift)}</button>`,
+  ).join("");
+}
+
 function renderAll() {
   elements.monthPicker.value = `${appData.display.year}-${String(appData.display.month + 1).padStart(2, "0")}`;
   applyHighlightColor();
@@ -1169,10 +1352,21 @@ function renderAll() {
   renderSummary();
   renderStaffSettings();
   renderRuleSettings();
+  renderShiftTypes();
+  renderShiftTypeLegend();
   renderPatterns();
   renderNgPairs();
   renderInputMode();
   renderShiftScore();
+}
+
+function renderShiftTypeLegend() {
+  elements.shiftTypeLegend.innerHTML = [
+    ...getShiftTypes().map((type) => `<span>${createShiftMark(type.symbol)}${escapeHtml(type.name)}</span>`),
+    '<span><i class="legend-chip request-legend">*</i>希望</span>',
+    '<span><i class="legend-chip warning-legend">!</i>警告</span>',
+    '<span><i class="legend-chip boundary-legend">↔</i>月またぎ確認</span>',
+  ].join("");
 }
 
 function renderStaffSettings() {
@@ -1192,14 +1386,6 @@ function renderStaffSettings() {
                 .join("")}
             </select>
           </label>
-          <label>
-            <input
-              type="checkbox"
-              data-auto-target-staff-id="${escapeHtml(staff.id)}"
-              ${staff.autoTarget !== false ? "checked" : ""}
-            />
-            自動対象
-          </label>
           <button
             class="staff-edit-button"
             type="button"
@@ -1215,9 +1401,35 @@ function renderStaffSettings() {
           >
             削除
           </button>
+          <div class="staff-setting-controls">
+            ${[
+              ["night", "夜勤上限"], ["late", "遅出上限"], ["long", "ロング上限"],
+              ["evening", "入上限"], ["deepNight", "明上限"], ["consecutive", "連勤上限"],
+            ].map(([key, label]) => `
+              <label class="staff-limit-setting"><span>${label}</span>
+                <input type="number" min="0" max="31" value="${staff.limits[key]}" data-staff-limit-id="${escapeHtml(staff.id)}" data-limit-key="${key}" />
+              </label>`).join("")}
+          </div>
+          <div class="staff-auto-settings">
+            <label><input type="checkbox" data-auto-placement-staff-id="${escapeHtml(staff.id)}" ${staff.autoPlacementTarget !== false ? "checked" : ""} />自動配置</label>
+            <label><input type="checkbox" data-auto-adjustment-staff-id="${escapeHtml(staff.id)}" ${staff.autoAdjustmentTarget !== false ? "checked" : ""} />自動調整</label>
+          </div>
         </div>`,
     )
     .join("");
+}
+
+function renderShiftTypes() {
+  elements.shiftTypeList.innerHTML = getShiftTypes().map((type) => `
+    <div class="shift-type-item">
+      ${createShiftMark(type.symbol)}
+      <span class="shift-type-item-name" title="${escapeHtml(type.name)}">${escapeHtml(type.name)} <small>(${escapeHtml(type.category)})</small></span>
+      <span class="shift-type-item-actions">
+        <button class="staff-edit-button" type="button" data-edit-shift-type="${escapeHtml(type.symbol)}">編集</button>
+        <button class="staff-delete-button" type="button" data-delete-shift-type="${escapeHtml(type.symbol)}">削除</button>
+      </span>
+    </div>`).join("");
+  renderPatternShiftButtons();
 }
 
 function renderRuleSettings() {
@@ -1400,6 +1612,9 @@ function addStaff() {
     name: "新規スタッフ",
     power: 1,
     autoTarget: true,
+    autoPlacementTarget: true,
+    autoAdjustmentTarget: true,
+    limits: { ...DEFAULT_STAFF_LIMITS },
   });
   saveData();
   renderAll();
@@ -1529,10 +1744,14 @@ function canAutoPlacePattern(staffId, startDay, pattern) {
     return false;
   }
 
-  return pattern.shifts.every((shift, index) => {
+  const cellsAvailable = pattern.shifts.every((shift, index) => {
     const day = startDay + index;
-    return shift && !getShift(staffId, day) && !getRequest(staffId, day);
+    const type = getShiftType(shift);
+    const nextRequest = getRequest(staffId, day + 1);
+    return shift && type?.useForAuto !== false && !getShift(staffId, day) && !getRequest(staffId, day) &&
+      !(type?.blockedBeforeRequestedOff && isShiftTypeFlag(nextRequest, "isRest"));
   });
+  return cellsAvailable && !patternExceedsStaffLimits(staffId, startDay, pattern);
 }
 
 function getMonthWarningCount() {
@@ -1627,7 +1846,7 @@ function shuffleArray(items) {
 
 function getAutoPatterns() {
   return appData.patterns.filter(
-    (pattern) => pattern.useForAuto !== false && pattern.shifts.every(Boolean),
+    (pattern) => pattern.useForAuto !== false && pattern.shifts.every((shift) => shift && getShiftType(shift)?.useForAuto !== false),
   );
 }
 
@@ -1673,8 +1892,8 @@ function runAutoPlacement() {
       "自動配置に使うパターンがありません。";
     return { patternCount: 0, cellCount: 0 };
   }
-  if (!appData.staff.some((staff) => staff.autoTarget !== false)) {
-    elements.autoPlacementResult.textContent = "自動対象のスタッフがいません。";
+  if (!appData.staff.some((staff) => staff.autoPlacementTarget !== false)) {
+    elements.autoPlacementResult.textContent = "自動配置対象のスタッフがいません。";
     return { patternCount: 0, cellCount: 0 };
   }
 
@@ -1690,7 +1909,7 @@ function runAutoPlacement() {
   const patternUsageCounts = new Map();
 
   const staffOrder = shuffleArray(
-    appData.staff.filter((staff) => staff.autoTarget !== false).map((staff) => ({ staff })),
+    appData.staff.filter((staff) => staff.autoPlacementTarget !== false).map((staff) => ({ staff })),
   );
   staffOrder.forEach(({ staff }, staffIndex) => {
     const dayOrder = getStaffDayOrder(staffIndex, daysInMonth);
@@ -1736,7 +1955,7 @@ function runAutoPlacement() {
 function getAdjustableCells() {
   const adjustableShifts = new Set(["日", "遅", "休"]);
   const cells = [];
-  appData.staff.filter((staff) => staff.autoTarget !== false).forEach((staff) => {
+  appData.staff.filter((staff) => staff.autoAdjustmentTarget !== false).forEach((staff) => {
     for (let day = 1; day <= getDaysInMonth(); day += 1) {
       const shift = getShift(staff.id, day);
       if (getRequest(staff.id, day)) continue;
@@ -1759,7 +1978,7 @@ function createNightAdjustmentCandidate() {
     if (!shouldReduceNight) continue;
 
     const nightStaff = appData.staff.filter(
-      (staff) => staff.autoTarget !== false && getShift(staff.id, day) === "入",
+      (staff) => staff.autoAdjustmentTarget !== false && getShift(staff.id, day) === "入",
     );
     const seniorNightCount = nightStaff.filter((staff) => staff.power >= 2).length;
     const juniorNightCount = nightStaff.filter((staff) => staff.power === 1).length;
@@ -1799,7 +2018,7 @@ function createLateExcessAdjustmentCandidate() {
   const candidates = [];
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
     const lateStaff = appData.staff.filter(
-      (staff) => staff.autoTarget !== false && getShift(staff.id, day) === "遅",
+      (staff) => staff.autoAdjustmentTarget !== false && getShift(staff.id, day) === "遅",
     );
     if (lateStaff.length < 2) continue;
 
@@ -1877,8 +2096,8 @@ function undoAdjustmentChange(change) {
 function runAutoAdjustment() {
   closeCellEditor();
   hideNotice();
-  if (!appData.staff.some((staff) => staff.autoTarget !== false)) {
-    const message = "自動対象のスタッフがいません。";
+  if (!appData.staff.some((staff) => staff.autoAdjustmentTarget !== false)) {
+    const message = "自動調整対象のスタッフがいません。";
     elements.autoPlacementResult.textContent = message;
     showNotice(message);
     return { initialScore: calculateShiftScore().score, currentScore: calculateShiftScore().score, acceptedCount: 0 };
@@ -1977,6 +2196,131 @@ function closePatternDialog() {
   uiState.patternDraft = [];
 }
 
+function populateShiftTypeRuleOptions(current = null) {
+  const options = getShiftTypes().map((type) =>
+    `<option value="${escapeHtml(type.symbol)}">${escapeHtml(type.symbol)}：${escapeHtml(type.name)}</option>`,
+  ).join("");
+  elements.shiftTypeRequiredNext.innerHTML = `<option value="">指定なし</option>${options}`;
+  elements.shiftTypeForbiddenNext.innerHTML = options;
+  elements.shiftTypeRequiredNext.value = current?.requiredNext ?? "";
+  const forbidden = new Set(current?.forbiddenNext ?? []);
+  Array.from(elements.shiftTypeForbiddenNext.options).forEach((option) => {
+    option.selected = forbidden.has(option.value);
+  });
+}
+
+function openShiftTypeDialog(type = null) {
+  uiState.editingShiftTypeSymbol = type?.symbol ?? null;
+  elements.shiftTypeDialogTitle.textContent = type ? "勤務形態編集" : "勤務形態追加";
+  elements.shiftTypeSymbol.value = type?.symbol ?? "";
+  elements.shiftTypeName.value = type?.name ?? "";
+  elements.shiftTypeCategory.innerHTML = SHIFT_TYPE_CATEGORIES.map((category) =>
+    `<option value="${category}">${category}</option>`,
+  ).join("");
+  elements.shiftTypeCategory.value = type?.category ?? "その他勤務";
+  elements.shiftTypeColor.value = type?.color ?? "#e6eee9";
+  document.querySelectorAll("[data-shift-type-flag]").forEach((input) => {
+    input.checked = Boolean(type?.[input.dataset.shiftTypeFlag]);
+  });
+  populateShiftTypeRuleOptions(type);
+  elements.shiftTypeError.textContent = "";
+  elements.shiftTypeDialog.showModal();
+  elements.shiftTypeSymbol.focus();
+}
+
+function closeShiftTypeDialog() {
+  elements.shiftTypeDialog.close();
+  uiState.editingShiftTypeSymbol = null;
+}
+
+function replaceShiftSymbol(oldSymbol, newSymbol) {
+  if (!oldSymbol || oldSymbol === newSymbol) return;
+  Object.values(appData.schedules).forEach((month) => Object.values(month).forEach((days) => {
+    Object.keys(days).forEach((day) => { if (days[day] === oldSymbol) days[day] = newSymbol; });
+  }));
+  Object.values(appData.requests).forEach((month) => Object.values(month).forEach((days) => {
+    Object.keys(days).forEach((day) => { if (days[day] === oldSymbol) days[day] = newSymbol; });
+  }));
+  appData.patterns.forEach((pattern) => {
+    pattern.shifts = pattern.shifts.map((shift) => shift === oldSymbol ? newSymbol : shift);
+  });
+  appData.shiftTypes.forEach((type) => {
+    if (type.requiredNext === oldSymbol) type.requiredNext = newSymbol;
+    type.forbiddenNext = type.forbiddenNext.map((symbol) => symbol === oldSymbol ? newSymbol : symbol);
+  });
+}
+
+function saveShiftType() {
+  const oldSymbol = uiState.editingShiftTypeSymbol;
+  const symbol = elements.shiftTypeSymbol.value.trim();
+  const name = elements.shiftTypeName.value.trim();
+  if (!symbol || !name) {
+    elements.shiftTypeError.textContent = "記号と名称を入力してください。";
+    return;
+  }
+  if (getShiftTypes().some((type) => type.symbol === symbol && type.symbol !== oldSymbol)) {
+    elements.shiftTypeError.textContent = "同じ記号が既に登録されています。";
+    return;
+  }
+  if (symbol === "日/遅") {
+    elements.shiftTypeError.textContent = "「日/遅」は希望入力で使用する予約記号です。別の記号を指定してください。";
+    return;
+  }
+  const nextType = {
+    symbol,
+    name,
+    category: elements.shiftTypeCategory.value,
+    color: elements.shiftTypeColor.value,
+    requiredNext: elements.shiftTypeRequiredNext.value,
+    forbiddenNext: Array.from(elements.shiftTypeForbiddenNext.selectedOptions).map((option) => option.value),
+  };
+  document.querySelectorAll("[data-shift-type-flag]").forEach((input) => {
+    nextType[input.dataset.shiftTypeFlag] = input.checked;
+  });
+  if (oldSymbol && oldSymbol !== symbol) {
+    if (nextType.requiredNext === oldSymbol) nextType.requiredNext = symbol;
+    nextType.forbiddenNext = nextType.forbiddenNext.map((value) => value === oldSymbol ? symbol : value);
+  }
+  if (oldSymbol) {
+    replaceShiftSymbol(oldSymbol, symbol);
+    const index = appData.shiftTypes.findIndex((type) => type.symbol === oldSymbol);
+    appData.shiftTypes[index] = nextType;
+  } else {
+    appData.shiftTypes.push(nextType);
+  }
+  closeShiftTypeDialog();
+  saveData();
+  renderAll();
+  showNotice(`勤務形態「${name}」を保存しました。`);
+}
+
+function isShiftTypeInUse(symbol) {
+  const scheduleUse = Object.values(appData.schedules).some((month) =>
+    Object.values(month).some((days) => Object.values(days).includes(symbol)),
+  );
+  const requestUse = Object.values(appData.requests).some((month) =>
+    Object.values(month).some((days) => Object.values(days).includes(symbol)),
+  );
+  return scheduleUse || requestUse || appData.patterns.some((pattern) => pattern.shifts.includes(symbol));
+}
+
+function deleteShiftType(symbol) {
+  const type = getShiftType(symbol);
+  if (!type) return;
+  if (isShiftTypeInUse(symbol)) {
+    showNotice(`「${type.name}」は勤務表・希望・パターンで使用中のため削除できません。`);
+    return;
+  }
+  if (!window.confirm(`勤務形態「${type.name}」を削除しますか？`)) return;
+  appData.shiftTypes = appData.shiftTypes.filter((item) => item.symbol !== symbol);
+  appData.shiftTypes.forEach((item) => {
+    if (item.requiredNext === symbol) item.requiredNext = "";
+    item.forbiddenNext = item.forbiddenNext.filter((value) => value !== symbol);
+  });
+  saveData();
+  renderAll();
+}
+
 function createPatternId() {
   return `pattern-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -2039,10 +2383,7 @@ function resetApplication() {
   renderAll();
 }
 
-elements.shiftAddButtons.innerHTML = PATTERN_SHIFT_OPTIONS.map(
-  (shift) =>
-    `<button class="shift-add-button" type="button" data-add-shift="${shift}">${createPatternShiftMark(shift)}</button>`,
-).join("");
+renderPatternShiftButtons();
 
 elements.previousMonth.addEventListener("click", () => changeMonth(-1));
 elements.nextMonth.addEventListener("click", () => changeMonth(1));
@@ -2063,16 +2404,45 @@ elements.staffSettingsList.addEventListener("change", (event) => {
     return;
   }
 
-  const autoTargetInput = event.target.closest("[data-auto-target-staff-id]");
-  if (!autoTargetInput) return;
-  const staff = appData.staff.find(
-    (item) => item.id === autoTargetInput.dataset.autoTargetStaffId,
-  );
+  const limitInput = event.target.closest("[data-staff-limit-id]");
+  if (limitInput) {
+    const staff = appData.staff.find((item) => item.id === limitInput.dataset.staffLimitId);
+    if (!staff) return;
+    staff.limits[limitInput.dataset.limitKey] = Math.max(0, Math.min(31, Number(limitInput.value) || 0));
+    saveData();
+    renderSchedule();
+    renderStaffSettings();
+    return;
+  }
+
+  const placementInput = event.target.closest("[data-auto-placement-staff-id]");
+  const adjustmentInput = event.target.closest("[data-auto-adjustment-staff-id]");
+  if (!placementInput && !adjustmentInput) return;
+  const staffId = placementInput?.dataset.autoPlacementStaffId ?? adjustmentInput?.dataset.autoAdjustmentStaffId;
+  const staff = appData.staff.find((item) => item.id === staffId);
   if (!staff) return;
-  staff.autoTarget = autoTargetInput.checked;
+  if (placementInput) staff.autoPlacementTarget = placementInput.checked;
+  if (adjustmentInput) staff.autoAdjustmentTarget = adjustmentInput.checked;
   saveData();
   renderStaffSettings();
 });
+
+elements.addShiftType.addEventListener("click", () => openShiftTypeDialog());
+elements.shiftTypeList.addEventListener("click", (event) => {
+  const editButton = event.target.closest("[data-edit-shift-type]");
+  if (editButton) {
+    openShiftTypeDialog(getShiftType(editButton.dataset.editShiftType));
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-shift-type]");
+  if (deleteButton) deleteShiftType(deleteButton.dataset.deleteShiftType);
+});
+elements.shiftTypeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveShiftType();
+});
+elements.shiftTypeClose.addEventListener("click", closeShiftTypeDialog);
+elements.shiftTypeCancel.addEventListener("click", closeShiftTypeDialog);
 
 elements.staffSettingsList.addEventListener("click", (event) => {
   const nameButton = event.target.closest("[data-name-staff-id]");

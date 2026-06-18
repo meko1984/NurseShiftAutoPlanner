@@ -89,7 +89,7 @@
         </div>
 
         <div class="table-legend" aria-label="勤務記号とP値の凡例">
-          <div class="legend legend-shifts">
+          <div id="shift-type-legend" class="legend legend-shifts">
             <span><i class="legend-chip shift-day">日</i>日勤</span>
             <span><i class="legend-chip shift-late">遅</i>遅出</span>
             <span><i class="legend-chip shift-night">入</i>夜勤入</span>
@@ -207,6 +207,18 @@
           </div>
           <div id="rule-settings" class="rule-settings"></div>
         </section>
+
+        <section class="side-card shift-type-card" aria-labelledby="shift-type-heading">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">SHIFT TYPES</p>
+              <h2 id="shift-type-heading">勤務形態設定</h2>
+            </div>
+            <button id="add-shift-type" class="compact-button" type="button">＋ 追加</button>
+          </div>
+          <p class="shift-type-help">記号・色・集計方法・翌日ルールを病棟に合わせて設定できます。</p>
+          <div id="shift-type-list" class="shift-type-list"></div>
+        </section>
       </aside>
     </main>
 
@@ -303,6 +315,53 @@
           <button id="pattern-dialog-cancel" class="secondary-button" type="button">
             キャンセル
           </button>
+          <button class="primary-button dialog-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="shift-type-dialog" class="shift-type-dialog">
+      <form id="shift-type-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">SHIFT TYPE EDITOR</p>
+            <h2 id="shift-type-dialog-title">勤務形態追加</h2>
+          </div>
+          <button id="shift-type-close" class="dialog-close" type="button" aria-label="閉じる">&times;</button>
+        </div>
+
+        <div class="shift-type-basic-fields">
+          <label class="dialog-field"><span>記号</span><input id="shift-type-symbol" type="text" maxlength="4" required /></label>
+          <label class="dialog-field"><span>名称</span><input id="shift-type-name" type="text" maxlength="20" required /></label>
+          <label class="dialog-field"><span>区分</span><select id="shift-type-category"></select></label>
+          <label class="dialog-field"><span>色</span><input id="shift-type-color" type="color" value="#dcefe5" /></label>
+        </div>
+
+        <fieldset class="shift-type-flags">
+          <legend>勤務・集計属性</legend>
+          <label><input type="checkbox" data-shift-type-flag="isWork" />勤務扱い</label>
+          <label><input type="checkbox" data-shift-type-flag="isRest" />休み扱い</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsDay" />日勤人数</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsLate" />遅出人数</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsEvening" />準夜人数</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsDeepNight" />深夜人数</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsPublicHoliday" />公休</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsPaid" />有休</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsSummer" />夏休</label>
+          <label><input type="checkbox" data-shift-type-flag="countsAsWinter" />冬休</label>
+          <label><input type="checkbox" data-shift-type-flag="countsForPower" />Power</label>
+          <label><input type="checkbox" data-shift-type-flag="countsForConsecutive" />連勤</label>
+          <label><input type="checkbox" data-shift-type-flag="useForAuto" />自動配置で使用</label>
+          <label><input type="checkbox" data-shift-type-flag="blockedBeforeRequestedOff" />希望休の前日は禁止</label>
+        </fieldset>
+
+        <div class="shift-type-rule-fields">
+          <label class="dialog-field"><span>翌日に必要な勤務</span><select id="shift-type-required-next"></select></label>
+          <label class="dialog-field"><span>翌日に禁止する勤務（複数可）</span><select id="shift-type-forbidden-next" multiple size="5"></select></label>
+        </div>
+        <p id="shift-type-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="shift-type-cancel" class="secondary-button" type="button">キャンセル</button>
           <button class="primary-button dialog-primary" type="submit">保存</button>
         </div>
       </form>
