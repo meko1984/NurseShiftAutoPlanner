@@ -237,20 +237,18 @@
     if (day === daysInMonth) {
       data.staff.forEach((staff) => {
         const limits = staff.limits ?? {};
-        const totals = { night: 0, late: 0, long: 0, evening: 0, deepNight: 0 };
+        const totals = { late: 0, evening: 0 };
         for (let targetDay = 1; targetDay <= daysInMonth; targetDay += 1) {
           const type = getShiftType(data, getShift(data, staff.id, year, month, targetDay));
           if (!type) continue;
-          if (type.countsAsEvening) { totals.night += 1; totals.evening += 1; }
-          if (type.countsAsDeepNight) totals.deepNight += 1;
+          if (type.countsAsEvening) totals.evening += 1;
           if (type.countsAsLate) totals.late += 1;
-          if (type.category === "その他勤務") totals.long += 1;
         }
-        [["夜勤", "night"], ["遅出", "late"], ["ロング勤務", "long"], ["入", "evening"], ["明", "deepNight"]]
+        [["遅出", "late"], ["入", "evening"]]
           .forEach(([label, key]) => {
             const limit = Number(limits[key]);
             if (Number.isFinite(limit) && totals[key] > limit) {
-              warnings.push(`${staff.name}さん：${label}${totals[key]}回で、個人上限${limit}回を超えています。`);
+              warnings.push(`${staff.name}さんの${label}回数が上限を超えています。（${totals[key]}/${limit}）`);
             }
           });
         const consecutiveLimit = Number(limits.consecutive);
@@ -265,7 +263,7 @@
             } else current = 0;
           }
           if (longest > consecutiveLimit) {
-            warnings.push(`${staff.name}さん：最大${longest}連勤で、個人上限${consecutiveLimit}日を超えています。`);
+            warnings.push(`${staff.name}さんの連勤が上限を超えています。（${longest}/${consecutiveLimit}）`);
           }
         }
       });

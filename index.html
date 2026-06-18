@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>管理者支援システム Ver0.5</title>
+    <title>管理者支援システム Ver0.6</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -114,7 +114,7 @@
                 <p class="section-kicker">SHIFT PATTERNS</p>
                 <h2 id="pattern-heading">パターン管理</h2>
               </div>
-              <span class="version-badge">Ver0.5</span>
+              <span class="version-badge">Ver0.6</span>
             </div>
 
             <div id="pattern-list" class="pattern-list" role="group" aria-label="パターン選択"></div>
@@ -143,6 +143,18 @@
             </div>
           </section>
 
+          <section class="side-card shift-type-card" aria-labelledby="shift-type-heading">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">SHIFT TYPES</p>
+                <h2 id="shift-type-heading">勤務形態設定</h2>
+              </div>
+              <button id="add-shift-type" class="compact-button" type="button">＋ 追加</button>
+            </div>
+            <p class="shift-type-help">記号・色・集計方法・翌日ルールを病棟に合わせて設定できます。</p>
+            <div id="shift-type-list" class="shift-type-list"></div>
+          </section>
+
           <section class="side-card staff-card" aria-labelledby="staff-settings-heading">
             <div class="card-heading">
               <div>
@@ -151,33 +163,8 @@
               </div>
               <button id="add-staff" class="compact-button" type="button">＋ 追加</button>
             </div>
+            <p class="staff-settings-help">各スタッフの自動対象と勤務回数上限を設定します。</p>
             <div id="staff-settings-list" class="staff-settings-list"></div>
-          </section>
-
-          <section class="side-card ng-pair-card" aria-labelledby="ng-pair-heading">
-            <div class="card-heading">
-              <div>
-                <p class="section-kicker">PAIR WARNINGS</p>
-                <h2 id="ng-pair-heading">NGペア</h2>
-              </div>
-              <span class="warning-badge">警告のみ</span>
-            </div>
-
-            <div class="ng-pair-form">
-              <label>
-                <span>スタッフ1</span>
-                <select id="ng-pair-first"></select>
-              </label>
-              <span class="ng-pair-symbol" aria-hidden="true">&times;</span>
-              <label>
-                <span>スタッフ2</span>
-                <select id="ng-pair-second"></select>
-              </label>
-              <button id="add-ng-pair" class="compact-button" type="button">追加</button>
-            </div>
-
-            <p id="ng-pair-error" class="ng-pair-error" role="alert"></p>
-            <div id="ng-pair-list" class="ng-pair-list" aria-label="登録済みNGペア"></div>
           </section>
         </div>
       </section>
@@ -198,6 +185,24 @@
           </div>
         </section>
 
+        <section class="side-card ng-pair-card" aria-labelledby="ng-pair-heading">
+          <div class="card-heading">
+            <div>
+              <p class="section-kicker">PAIR WARNINGS</p>
+              <h2 id="ng-pair-heading">NGペア</h2>
+            </div>
+            <span class="warning-badge">警告のみ</span>
+          </div>
+          <div class="ng-pair-form">
+            <label><span>スタッフ1</span><select id="ng-pair-first"></select></label>
+            <span class="ng-pair-symbol" aria-hidden="true">&times;</span>
+            <label><span>スタッフ2</span><select id="ng-pair-second"></select></label>
+            <button id="add-ng-pair" class="compact-button" type="button">追加</button>
+          </div>
+          <p id="ng-pair-error" class="ng-pair-error" role="alert"></p>
+          <div id="ng-pair-list" class="ng-pair-list" aria-label="登録済みNGペア"></div>
+        </section>
+
         <section class="side-card rule-card" aria-labelledby="rule-settings-heading">
           <div class="card-heading">
             <div>
@@ -208,17 +213,6 @@
           <div id="rule-settings" class="rule-settings"></div>
         </section>
 
-        <section class="side-card shift-type-card" aria-labelledby="shift-type-heading">
-          <div class="card-heading">
-            <div>
-              <p class="section-kicker">SHIFT TYPES</p>
-              <h2 id="shift-type-heading">勤務形態設定</h2>
-            </div>
-            <button id="add-shift-type" class="compact-button" type="button">＋ 追加</button>
-          </div>
-          <p class="shift-type-help">記号・色・集計方法・翌日ルールを病棟に合わせて設定できます。</p>
-          <div id="shift-type-list" class="shift-type-list"></div>
-        </section>
       </aside>
     </main>
 
@@ -357,7 +351,10 @@
 
         <div class="shift-type-rule-fields">
           <label class="dialog-field"><span>翌日に必要な勤務</span><select id="shift-type-required-next"></select></label>
-          <label class="dialog-field"><span>翌日に禁止する勤務（複数可）</span><select id="shift-type-forbidden-next" multiple size="5"></select></label>
+          <fieldset class="forbidden-next-field">
+            <legend>翌日に禁止する勤務（複数可）</legend>
+            <div id="shift-type-forbidden-next" class="forbidden-next-options"></div>
+          </fieldset>
         </div>
         <p id="shift-type-error" class="form-error" role="alert"></p>
         <div class="dialog-actions">

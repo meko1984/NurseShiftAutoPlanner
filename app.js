@@ -10,11 +10,8 @@ const SHIFT_TYPE_FLAGS = [
   "blockedBeforeRequestedOff",
 ];
 const DEFAULT_STAFF_LIMITS = {
-  night: 31,
-  late: 31,
-  long: 31,
-  evening: 31,
-  deepNight: 31,
+  late: 4,
+  evening: 4,
   consecutive: 6,
 };
 const REQUEST_LABELS = {
@@ -70,6 +67,7 @@ const AUTO_PLACEMENT_DEFAULTS = {
   staffBalanceWeight: 2,
   shortPatternWeight: 2,
   patternReuseWeight: 3,
+  staffLimitWeight: 1,
 };
 const DEFAULT_WARNING_RULES = {
   minDayStaff: 3,
@@ -762,7 +760,7 @@ function getStaffTotals(staffId) {
   const totals = {
     publicHoliday: 0, day: 0, late: 0, evening: 0, deepNight: 0,
     paid: 0, summer: 0, winter: 0, long: 0,
-    日: 0, 遅: 0, 入: 0, 有: 0, 夏: 0, 冬: 0,
+    日: 0, 遅: 0, 入: 0, 明: 0, 有: 0, 夏: 0, 冬: 0,
   };
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
     const shift = getShift(staffId, day);
@@ -781,6 +779,7 @@ function getStaffTotals(staffId) {
   totals.日 = totals.day;
   totals.遅 = totals.late;
   totals.入 = totals.evening;
+  totals.明 = totals.deepNight;
   totals.有 = totals.paid;
   totals.夏 = totals.summer;
   totals.冬 = totals.winter;
@@ -809,11 +808,8 @@ function getStaffLimitViolations(staff) {
   const totals = getStaffTotals(staff.id);
   const limits = staff.limits ?? DEFAULT_STAFF_LIMITS;
   const items = [
-    ["夜勤", totals.evening, limits.night],
     ["遅出", totals.late, limits.late],
-    ["ロング勤務", totals.long, limits.long],
     ["入", totals.evening, limits.evening],
-    ["明", totals.deepNight, limits.deepNight],
   ];
   const violations = items
     .filter(([, count, limit]) => Number.isFinite(limit) && count > limit)
@@ -832,16 +828,13 @@ function getStaffLimitViolations(staff) {
   return violations;
 }
 
-function patternExceedsStaffLimits(staffId, startDay, pattern) {
-  const staff = appData.staff.find((item) => item.id === staffId);
-  if (!staff) return true;
-  const getExcess = () => getStaffLimitViolations(staff)
+function getStaffLimitExcessTotal(staff) {
+  return getStaffLimitViolations(staff)
     .reduce((sum, item) => sum + Math.max(0, item.count - item.limit), 0);
-  const beforeExcess = getExcess();
-  pattern.shifts.forEach((shift, index) => setShift(staffId, startDay + index, shift));
-  const afterExcess = getExcess();
-  pattern.shifts.forEach((shift, index) => setShift(staffId, startDay + index, ""));
-  return afterExcess > beforeExcess;
+}
+
+function getAllStaffLimitExcessTotal() {
+  return appData.staff.reduce((sum, staff) => sum + getStaffLimitExcessTotal(staff), 0);
 }
 
 function hasConsecutiveWorkDays(staffId, day, length) {
@@ -963,8 +956,8 @@ function calculateShiftScore() {
     publicHolidayMismatch: 0,
     dayCountImbalance: 0,
     nightCountImbalance: 0,
-    staffLimitExceeded: 0,
   };
+  const staffLimitItems = [];
 
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
     const totals = getDailyTotals(day);
@@ -996,7 +989,13 @@ function calculateShiftScore() {
     if (totals.publicHoliday !== rules.targetPublicHoliday) counts.publicHolidayMismatch += 1;
     dayCounts.push(totals.日);
     nightCounts.push(totals.入);
-    counts.staffLimitExceeded += getStaffLimitViolations(staff).length;
+    getStaffLimitViolations(staff).forEach((violation) => {
+      staffLimitItems.push({
+        label: `${staff.name}さん ${violation.label}上限超過：${violation.count}/${violation.limit}`,
+        points: -SCORE_RULES.staffLimitExceeded,
+        detailOnly: true,
+      });
+    });
   });
 
   if (getCountSpread(dayCounts) >= 4) counts.dayCountImbalance = 1;
@@ -1057,8 +1056,8 @@ function calculateShiftScore() {
         SCORE_RULES.nightCountImbalance,
         "あり",
       ),
-      createScoreItem("スタッフ別上限超過", counts.staffLimitExceeded, SCORE_RULES.staffLimitExceeded),
     ]),
+    createScoreCategory("スタッフ別上限", staffLimitItems),
     createScoreCategory("NGペア", [
       createScoreItem("NGペア日勤被り", counts.ngPairDay, SCORE_RULES.ngPairDay),
       createScoreItem("NGペア夜勤被り", counts.ngPairNight, SCORE_RULES.ngPairNight),
@@ -1101,6 +1100,7 @@ function toggleScorePanel() {
 }
 
 function formatScoreItem(item) {
+  if (item.detailOnly) return `${escapeHtml(item.label)}　${item.points}点`;
   const countText = item.unit === "あり" ? "あり" : `${item.count}${item.unit}`;
   return `${escapeHtml(item.label)}：${countText}　${item.points}点`;
 }
@@ -1142,13 +1142,14 @@ function renderSummary() {
   appData.staff.forEach((staff) => {
     const totals = getStaffTotals(staff.id);
     const publicHolidayStatus = getPublicHolidayStatusClass(totals.publicHoliday);
+    const limitStatus = (value, key) => value > staff.limits[key] ? "status-danger" : "";
     html += `
       <tr>
         <th scope="row">${escapeHtml(staff.name)}</th>
         <td class="${publicHolidayStatus}">${totals.publicHoliday}</td>
         <td>${totals.日}</td>
-        <td>${totals.遅}</td>
-        <td>${totals.入}</td>
+        <td class="${limitStatus(totals.遅, "late")}">${totals.遅}</td>
+        <td class="${limitStatus(totals.入, "evening")}">${totals.入}</td>
         <td>${totals.有}</td>
         <td>${totals.夏}</td>
         <td>${totals.冬}</td>
@@ -1370,53 +1371,26 @@ function renderShiftTypeLegend() {
 }
 
 function renderStaffSettings() {
-  elements.staffSettingsList.innerHTML = appData.staff
-    .map(
-      (staff) => `
-        <div class="staff-setting-item">
-          <span title="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}</span>
-          <label class="staff-power-setting">
-            <span>P</span>
-            <select data-power-staff-id="${escapeHtml(staff.id)}" aria-label="${escapeHtml(staff.name)}さんのPower">
-              ${[1, 2, 3, 4]
-                .map(
-                  (power) =>
-                    `<option value="${power}" ${power === staff.power ? "selected" : ""}>${power}</option>`,
-                )
-                .join("")}
-            </select>
-          </label>
-          <button
-            class="staff-edit-button"
-            type="button"
-            data-name-staff-id="${escapeHtml(staff.id)}"
-          >
-            名前
-          </button>
-          <button
-            class="staff-delete-button"
-            type="button"
-            data-delete-staff-id="${escapeHtml(staff.id)}"
-            ${appData.staff.length <= 1 ? "disabled" : ""}
-          >
-            削除
-          </button>
-          <div class="staff-setting-controls">
-            ${[
-              ["night", "夜勤上限"], ["late", "遅出上限"], ["long", "ロング上限"],
-              ["evening", "入上限"], ["deepNight", "明上限"], ["consecutive", "連勤上限"],
-            ].map(([key, label]) => `
-              <label class="staff-limit-setting"><span>${label}</span>
-                <input type="number" min="0" max="31" value="${staff.limits[key]}" data-staff-limit-id="${escapeHtml(staff.id)}" data-limit-key="${key}" />
-              </label>`).join("")}
-          </div>
-          <div class="staff-auto-settings">
-            <label><input type="checkbox" data-auto-placement-staff-id="${escapeHtml(staff.id)}" ${staff.autoPlacementTarget !== false ? "checked" : ""} />自動配置</label>
-            <label><input type="checkbox" data-auto-adjustment-staff-id="${escapeHtml(staff.id)}" ${staff.autoAdjustmentTarget !== false ? "checked" : ""} />自動調整</label>
-          </div>
-        </div>`,
-    )
-    .join("");
+  const rows = appData.staff.map((staff) => `
+    <tr class="staff-setting-item">
+      <th scope="row">
+        <button class="staff-name-edit" type="button" data-name-staff-id="${escapeHtml(staff.id)}" title="氏名を編集">${escapeHtml(staff.name)}</button>
+      </th>
+      <td><select data-power-staff-id="${escapeHtml(staff.id)}" aria-label="${escapeHtml(staff.name)}さんのPower">
+        ${[1, 2, 3, 4].map((power) => `<option value="${power}" ${power === staff.power ? "selected" : ""}>${power}</option>`).join("")}
+      </select></td>
+      <td><input type="checkbox" data-auto-placement-staff-id="${escapeHtml(staff.id)}" aria-label="${escapeHtml(staff.name)}さんを自動配置対象にする" ${staff.autoPlacementTarget !== false ? "checked" : ""} /></td>
+      <td><input type="checkbox" data-auto-adjustment-staff-id="${escapeHtml(staff.id)}" aria-label="${escapeHtml(staff.name)}さんを自動調整対象にする" ${staff.autoAdjustmentTarget !== false ? "checked" : ""} /></td>
+      ${[["late", "遅出"], ["evening", "入"], ["consecutive", "連勤"]].map(([key, label]) => `
+        <td><input class="staff-limit-input" type="number" min="0" max="31" value="${staff.limits[key]}" data-staff-limit-id="${escapeHtml(staff.id)}" data-limit-key="${key}" aria-label="${escapeHtml(staff.name)}さんの${label}上限" /></td>`).join("")}
+      <td><button class="staff-delete-button" type="button" data-delete-staff-id="${escapeHtml(staff.id)}" ${appData.staff.length <= 1 ? "disabled" : ""}>削除</button></td>
+    </tr>`).join("");
+
+  elements.staffSettingsList.innerHTML = `
+    <table class="staff-settings-table">
+      <thead><tr><th>名前</th><th>P</th><th>自動配置</th><th>自動調整</th><th>遅出</th><th>入</th><th>連勤</th><th>削除</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 function renderShiftTypes() {
@@ -1751,13 +1725,16 @@ function canAutoPlacePattern(staffId, startDay, pattern) {
     return shift && type?.useForAuto !== false && !getShift(staffId, day) && !getRequest(staffId, day) &&
       !(type?.blockedBeforeRequestedOff && isShiftTypeFlag(nextRequest, "isRest"));
   });
-  return cellsAvailable && !patternExceedsStaffLimits(staffId, startDay, pattern);
+  return cellsAvailable;
 }
 
-function getMonthWarningCount() {
+function getMonthWarningCount({ excludeStaffLimits = false } = {}) {
   let count = 0;
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
-    count += getWarnings(day).length;
+    const warnings = getWarnings(day);
+    count += excludeStaffLimits
+      ? warnings.filter((warning) => !warning.includes("上限を超えています")).length
+      : warnings.length;
   }
   return count;
 }
@@ -1788,6 +1765,8 @@ function getAutoPlacementRules() {
       Number(saved.shortPatternWeight) || AUTO_PLACEMENT_DEFAULTS.shortPatternWeight,
     patternReuseWeight:
       Number(saved.patternReuseWeight) || AUTO_PLACEMENT_DEFAULTS.patternReuseWeight,
+    staffLimitWeight:
+      Number(saved.staffLimitWeight) || AUTO_PLACEMENT_DEFAULTS.staffLimitWeight,
   };
 }
 
@@ -1816,20 +1795,23 @@ function evaluateAutoPlacement(staffId, startDay, pattern) {
   pattern.shifts.forEach((shift, index) => {
     setShift(staffId, startDay + index, shift);
   });
-  const warningCount = getMonthWarningCount();
+  const warningCount = getMonthWarningCount({ excludeStaffLimits: true });
   const balancePenalty = getMonthBalancePenalty();
   const staffPenalty = getStaffBalancePenalty();
+  const staffLimitPenalty =
+    getAllStaffLimitExcessTotal() * getAutoPlacementRules().staffLimitWeight;
   const shortPatternPenalty =
     pattern.shifts.length <= 2 ? getAutoPlacementRules().shortPatternWeight : 0;
   const score =
     warningCount * getAutoPlacementRules().warningWeight +
     balancePenalty +
     staffPenalty +
+    staffLimitPenalty +
     shortPatternPenalty;
   pattern.shifts.forEach((shift, index) => {
     setShift(staffId, startDay + index, "");
   });
-  return { warningCount, balancePenalty, staffPenalty, score };
+  return { warningCount, balancePenalty, staffPenalty, staffLimitPenalty, score };
 }
 
 function shuffleArray(items) {
@@ -2043,7 +2025,69 @@ function createLateExcessAdjustmentCandidate() {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+function createStaffLimitAdjustmentCandidate() {
+  const candidates = [];
+  const daySymbol = getShiftTypes().find((type) => type.countsAsDay)?.symbol ?? "日";
+  const offSymbol = getShiftTypes().find((type) => type.countsAsPublicHoliday)?.symbol ?? "休";
+  const targetOffDays = getWarningRules().targetPublicHoliday;
+
+  appData.staff
+    .filter((staff) => staff.autoAdjustmentTarget !== false)
+    .forEach((staff) => {
+      const violations = getStaffLimitViolations(staff);
+      const labels = new Set(violations.map((violation) => violation.label));
+
+      if (labels.has("遅出")) {
+        for (let day = 1; day <= getDaysInMonth(); day += 1) {
+          const shift = getShift(staff.id, day);
+          if (!isShiftTypeFlag(shift, "countsAsLate") || getRequest(staff.id, day)) continue;
+          const preferred = getStaffTotals(staff.id).publicHoliday < targetOffDays ? offSymbol : daySymbol;
+          [preferred, preferred === offSymbol ? daySymbol : offSymbol].forEach((after) => {
+            candidates.push({
+              type: "staff-late-limit",
+              cells: [{ staffId: staff.id, day, before: shift, after }],
+            });
+          });
+        }
+      }
+
+      if (labels.has("入")) {
+        for (let day = 1; day < getDaysInMonth(); day += 1) {
+          if (getShift(staff.id, day) !== "入" || getShift(staff.id, day + 1) !== "明") continue;
+          if (getRequest(staff.id, day) || getRequest(staff.id, day + 1)) continue;
+          [offSymbol, daySymbol].forEach((after) => {
+            candidates.push({
+              type: "staff-night-limit",
+              cells: [
+                { staffId: staff.id, day, before: "入", after },
+                { staffId: staff.id, day: day + 1, before: "明", after },
+              ],
+            });
+          });
+        }
+      }
+
+      if (labels.has("連勤")) {
+        for (let day = 1; day <= getDaysInMonth(); day += 1) {
+          const shift = getShift(staff.id, day);
+          if (getRequest(staff.id, day)) continue;
+          if (!isShiftTypeFlag(shift, "countsAsDay") && !isShiftTypeFlag(shift, "countsAsLate")) continue;
+          candidates.push({
+            type: "staff-consecutive-limit",
+            cells: [{ staffId: staff.id, day, before: shift, after: offSymbol }],
+          });
+        }
+      }
+    });
+
+  if (!candidates.length) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
 function createAdjustmentCandidate() {
+  const staffLimitCandidate = createStaffLimitAdjustmentCandidate();
+  if (staffLimitCandidate && Math.random() < 0.8) return staffLimitCandidate;
+
   const lateExcessCandidate = createLateExcessAdjustmentCandidate();
   if (lateExcessCandidate && Math.random() < 0.7) return lateExcessCandidate;
 
@@ -2051,7 +2095,7 @@ function createAdjustmentCandidate() {
   if (nightCandidate && Math.random() < 0.35) return nightCandidate;
 
   const cells = getAdjustableCells();
-  if (!cells.length) return lateExcessCandidate || nightCandidate;
+  if (!cells.length) return staffLimitCandidate || lateExcessCandidate || nightCandidate;
 
   if (cells.length >= 2 && Math.random() < 0.45) {
     const first = cells[Math.floor(Math.random() * cells.length)];
@@ -2201,12 +2245,14 @@ function populateShiftTypeRuleOptions(current = null) {
     `<option value="${escapeHtml(type.symbol)}">${escapeHtml(type.symbol)}：${escapeHtml(type.name)}</option>`,
   ).join("");
   elements.shiftTypeRequiredNext.innerHTML = `<option value="">指定なし</option>${options}`;
-  elements.shiftTypeForbiddenNext.innerHTML = options;
   elements.shiftTypeRequiredNext.value = current?.requiredNext ?? "";
   const forbidden = new Set(current?.forbiddenNext ?? []);
-  Array.from(elements.shiftTypeForbiddenNext.options).forEach((option) => {
-    option.selected = forbidden.has(option.value);
-  });
+  elements.shiftTypeForbiddenNext.innerHTML = getShiftTypes().map((type) => `
+    <label>
+      <input type="checkbox" value="${escapeHtml(type.symbol)}" data-forbidden-next ${forbidden.has(type.symbol) ? "checked" : ""} />
+      ${createShiftMark(type.symbol)}
+      <span>${escapeHtml(type.name)}</span>
+    </label>`).join("");
 }
 
 function openShiftTypeDialog(type = null) {
@@ -2272,7 +2318,8 @@ function saveShiftType() {
     category: elements.shiftTypeCategory.value,
     color: elements.shiftTypeColor.value,
     requiredNext: elements.shiftTypeRequiredNext.value,
-    forbiddenNext: Array.from(elements.shiftTypeForbiddenNext.selectedOptions).map((option) => option.value),
+    forbiddenNext: Array.from(elements.shiftTypeForbiddenNext.querySelectorAll("[data-forbidden-next]:checked"))
+      .map((input) => input.value),
   };
   document.querySelectorAll("[data-shift-type-flag]").forEach((input) => {
     nextType[input.dataset.shiftTypeFlag] = input.checked;
