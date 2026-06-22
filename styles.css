@@ -1,4 +1,5 @@
 :root {
+  --schedule-table-width: 904px;
   --ink: #17211d;
   --muted: #6c7771;
   --line: #cfd8d2;
@@ -579,9 +580,9 @@ select {
 }
 
 .schedule-table {
-  width: 904px;
-  min-width: 904px;
-  max-width: 904px;
+  width: 100%;
+  min-width: var(--schedule-table-width);
+  max-width: none;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -2139,7 +2140,7 @@ thead .power-column {
 
 @media (max-width: 1120px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {

@@ -583,33 +583,31 @@ function getDayType(day) {
 
 function renderSchedule() {
   const daysInMonth = getDaysInMonth();
+  const scheduleTableWidth = 64 + daysInMonth * 26 + 34;
+  document.documentElement.style.setProperty(
+    "--schedule-table-width",
+    `${scheduleTableWidth}px`,
+  );
   const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
   let html = "<thead><tr>";
 
   html += '<th class="name-column" rowspan="3">氏名</th>';
-  for (let day = 1; day <= 31; day += 1) {
-    const valid = day <= daysInMonth;
-    const note = valid ? getDayNote(day) : "";
-    html += `<th class="day-column event-column ${valid ? getDayType(day) : "invalid-day"}" ${valid ? `data-day="${day}"` : ""}>${
-      valid
-        ? `<button class="day-note-button" type="button" data-note-day="${day}" title="${escapeHtml(note || "行事予定を入力")}">${escapeHtml(note)}</button>`
-        : ""
-    }</th>`;
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const note = getDayNote(day);
+    html += `<th class="day-column event-column ${getDayType(day)}" data-day="${day}">
+      <button class="day-note-button" type="button" data-note-day="${day}" title="${escapeHtml(note || "行事予定を入力")}">${escapeHtml(note)}</button>
+    </th>`;
   }
   html += '<th class="power-column" rowspan="3">P</th></tr><tr>';
 
-  for (let day = 1; day <= 31; day += 1) {
-    const valid = day <= daysInMonth;
-    html += `<th class="day-column ${valid ? getDayType(day) : "invalid-day"}" ${valid ? `data-day="${day}"` : ""}>${valid ? day : ""}</th>`;
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    html += `<th class="day-column ${getDayType(day)}" data-day="${day}">${day}</th>`;
   }
   html += '</tr><tr>';
 
-  for (let day = 1; day <= 31; day += 1) {
-    const valid = day <= daysInMonth;
-    const weekDay = valid
-      ? weekdays[new Date(appData.display.year, appData.display.month, day).getDay()]
-      : "";
-    html += `<th class="day-column ${valid ? getDayType(day) : "invalid-day"}" ${valid ? `data-day="${day}"` : ""}>${weekDay}</th>`;
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const weekDay = weekdays[new Date(appData.display.year, appData.display.month, day).getDay()];
+    html += `<th class="day-column ${getDayType(day)}" data-day="${day}">${weekDay}</th>`;
   }
   html += "</tr></thead><tbody>";
 
@@ -619,12 +617,7 @@ function renderSchedule() {
         <th scope="row" class="name-column">
           <span class="staff-name-label" title="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}</span>
         </th>`;
-    for (let day = 1; day <= 31; day += 1) {
-      if (day > daysInMonth) {
-        html += '<td class="day-column invalid-day"></td>';
-        continue;
-      }
-
+    for (let day = 1; day <= daysInMonth; day += 1) {
       const shift = getShift(staff.id, day);
       const request = getRequest(staff.id, day);
       const displayLabel = shift || request || "空欄";
@@ -656,12 +649,7 @@ function renderSchedule() {
 
   totalRows.forEach((row, rowIndex) => {
     html += `<tr class="totals-row${rowIndex === 0 ? " totals-start" : ""}"><th scope="row">${row.label}</th>`;
-    for (let day = 1; day <= 31; day += 1) {
-      if (day > daysInMonth) {
-        html += '<td class="invalid-day"></td>';
-        continue;
-      }
-
+    for (let day = 1; day <= daysInMonth; day += 1) {
       if (row.key === "warning") {
         const warnings = getWarnings(day);
         const boundaryNotes = getMonthBoundaryNotes(day);
