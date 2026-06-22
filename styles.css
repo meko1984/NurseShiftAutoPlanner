@@ -39,11 +39,35 @@ body {
 button,
 input,
 select {
+  box-sizing: border-box;
   font: inherit;
+  line-height: normal;
 }
 
 button {
+  margin: 0;
   cursor: pointer;
+  text-align: center;
+  touch-action: manipulation;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(31, 107, 79, 0.55);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"] {
+  flex: none;
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 .app-header {
@@ -548,12 +572,16 @@ select {
 .schedule-scroll {
   max-width: 100%;
   overflow: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--line-strong) transparent;
+  -webkit-overflow-scrolling: touch;
 }
 
 .schedule-table {
-  width: max-content;
-  min-width: 100%;
+  width: 904px;
+  min-width: 904px;
+  max-width: 904px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -563,10 +591,16 @@ select {
 .schedule-table th,
 .schedule-table td {
   height: 27px;
+  min-height: 27px;
+  max-height: 27px;
   padding: 0;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+  line-height: 1;
   text-align: center;
+  vertical-align: middle;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .schedule-table tr > :last-child {
@@ -583,18 +617,24 @@ select {
 .schedule-table thead tr:first-child th {
   top: 0;
   height: 70px;
+  min-height: 70px;
+  max-height: 70px;
   border-bottom-color: var(--line-strong);
 }
 
 .schedule-table thead tr:nth-child(2) th {
   top: 70px;
   height: 25px;
+  min-height: 25px;
+  max-height: 25px;
   border-bottom-color: var(--line-strong);
 }
 
 .schedule-table thead tr:nth-child(3) th {
   top: 95px;
   height: 21px;
+  min-height: 21px;
+  max-height: 21px;
   color: var(--muted);
   font-size: 11px;
 }
@@ -730,8 +770,8 @@ thead .power-column {
 
 .shift-button:hover,
 .shift-button:focus-visible {
-  outline: 2px solid var(--green);
-  outline-offset: -2px;
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--green);
   background: var(--green-soft);
 }
 
@@ -908,11 +948,32 @@ thead .power-column {
     box-shadow: inset 0 0 0 9999px rgba(var(--cross-highlight-rgb), 0.025);
   }
 
-  .schedule-table .is-hover-cell {
+  .schedule-table tr.is-row-hover > th.is-hover-cell,
+  .schedule-table tr.is-row-hover > td.is-hover-cell {
     box-shadow:
       inset 0 0 0 9999px rgba(var(--cross-highlight-rgb), 0.04),
       inset 0 0 0 1px rgba(var(--cross-highlight-rgb), 0.2);
   }
+}
+
+.schedule-table tr.is-row-selected > th,
+.schedule-table tr.is-row-selected > td,
+.schedule-table .is-column-selected {
+  box-shadow: inset 0 0 0 9999px rgba(var(--cross-highlight-rgb), 0.025);
+}
+
+.schedule-table tr.is-row-selected > th.is-selected-cell,
+.schedule-table tr.is-row-selected > td.is-selected-cell {
+  box-shadow:
+    inset 0 0 0 9999px rgba(var(--cross-highlight-rgb), 0.04),
+    inset 0 0 0 2px rgba(var(--cross-highlight-rgb), 0.72);
+}
+
+.schedule-table tr.is-row-selected > td.is-selected-cell.shift-cell.has-request {
+  box-shadow:
+    inset 0 0 0 9999px rgba(var(--cross-highlight-rgb), 0.04),
+    inset 0 0 0 2px rgba(var(--cross-highlight-rgb), 0.72),
+    inset 0 0 0 3px rgba(176, 143, 45, 0.28);
 }
 
 .warning-cell {
@@ -929,7 +990,9 @@ thead .power-column {
   font-weight: 900;
 }
 
-.warning-button:hover {
+.warning-button:hover,
+.warning-button:focus-visible {
+  outline: 0;
   box-shadow: inset 0 0 0 2px var(--red);
 }
 
@@ -943,7 +1006,9 @@ thead .power-column {
   font-weight: 900;
 }
 
-.boundary-note-button:hover {
+.boundary-note-button:hover,
+.boundary-note-button:focus-visible {
+  outline: 0;
   box-shadow: inset 0 0 0 2px #c9a94c;
 }
 

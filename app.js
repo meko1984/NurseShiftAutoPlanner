@@ -1472,6 +1472,28 @@ function clearScheduleHover() {
     });
 }
 
+function clearScheduleSelection() {
+  elements.scheduleTable
+    .querySelectorAll(".is-row-selected, .is-column-selected, .is-selected-cell")
+    .forEach((element) => {
+      element.classList.remove("is-row-selected", "is-column-selected", "is-selected-cell");
+    });
+}
+
+function updateScheduleSelection(button) {
+  clearScheduleSelection();
+  const cell = button.closest("td");
+  const row = button.closest("tr");
+  const day = button.dataset.day;
+  if (!cell || !row || !day) return;
+
+  row.classList.add("is-row-selected");
+  elements.scheduleTable
+    .querySelectorAll(`[data-day="${day}"]`)
+    .forEach((element) => element.classList.add("is-column-selected"));
+  cell.classList.add("is-selected-cell");
+}
+
 function updateScheduleHover(target) {
   if (!target.closest) return;
   const cell = target.closest("th, td");
@@ -1506,6 +1528,7 @@ function openCellEditor(button) {
   if (!staff) return;
 
   uiState.editingCell = { staffId, day };
+  updateScheduleSelection(button);
   elements.cellEditorTitle.textContent =
     uiState.inputMode === "request"
       ? `${staff.name}さん・${day}日の希望`
@@ -1528,6 +1551,7 @@ function openCellEditor(button) {
 function closeCellEditor() {
   elements.cellEditor.hidden = true;
   uiState.editingCell = null;
+  clearScheduleSelection();
 }
 
 function openStaffNameDialog(staffId) {
