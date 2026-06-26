@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>管理者支援システム Ver0.7.2</title>
+    <title>管理者支援システム Ver0.7.3</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -12,6 +12,7 @@
         <p class="eyebrow">NURSE SHIFT PLANNER</p>
         <div class="title-line">
           <h1>管理者支援システム</h1>
+          <span class="app-version-badge">Ver0.7.3</span>
           <div class="shift-score-wrap">
             <button
               id="shift-score"
@@ -28,9 +29,6 @@
       </div>
 
       <div class="header-actions">
-        <a class="manual-link" href="docs/manual.html" target="_blank" rel="noopener">
-          使い方
-        </a>
         <span id="save-status" class="save-status" role="status" aria-live="polite">
           ✓ 保存済み
         </span>
@@ -49,16 +47,18 @@
         <button id="clear-shifts" class="clear-shifts-button" type="button">
           シフト表クリア
         </button>
-        <div class="export-actions" aria-label="CSV出力">
-          <button id="export-schedule-csv" class="compact-button" type="button">勤務表CSV</button>
-          <button id="export-staff-summary-csv" class="compact-button" type="button">個人集計CSV</button>
-          <button id="export-daily-summary-csv" class="compact-button" type="button">日別集計CSV</button>
-          <button id="export-warnings-csv" class="compact-button" type="button">警告CSV</button>
-        </div>
-        <button id="print-check" class="clear-shifts-button print-check-button" type="button">
-          印刷前チェック
+        <button id="open-export-dialog" class="clear-shifts-button csv-menu-button" type="button">
+          CSV出力
         </button>
-        <button id="reset-app" class="reset-button" type="button">初期化</button>
+        <div class="header-utility-actions">
+          <a class="manual-link" href="docs/manual.html" target="_blank" rel="noopener">
+            使い方
+          </a>
+          <button id="print-check" class="clear-shifts-button print-check-button" type="button">
+            印刷前チェック
+          </button>
+          <button id="reset-app" class="reset-button" type="button">初期化</button>
+        </div>
       </div>
     </header>
 
@@ -78,7 +78,7 @@
         </div>
         <div>
           <dt>バージョン</dt>
-          <dd id="print-version">Ver0.7.2</dd>
+          <dd id="print-version">Ver0.7.3</dd>
         </div>
       </dl>
     </section>
@@ -147,7 +147,7 @@
                 <p class="section-kicker">SHIFT PATTERNS</p>
                 <h2 id="pattern-heading">パターン管理</h2>
               </div>
-              <span class="version-badge">Ver0.7.2</span>
+              <span class="version-badge">Ver0.7.3</span>
             </div>
 
             <div id="pattern-list" class="pattern-list" role="group" aria-label="パターン選択"></div>
@@ -330,6 +330,41 @@
       </form>
     </dialog>
 
+    <dialog id="export-dialog" class="export-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">CSV EXPORT</p>
+            <h2>CSV出力</h2>
+          </div>
+          <button id="export-dialog-close" class="dialog-close" type="button" aria-label="閉じる">&times;</button>
+        </div>
+
+        <div class="export-actions export-choice-list" aria-label="CSV出力">
+          <button id="export-schedule-csv" class="export-choice-button" type="button">
+            <strong>勤務表CSV</strong>
+            <span>氏名、P値、日ごとの勤務を出力します。</span>
+          </button>
+          <button id="export-staff-summary-csv" class="export-choice-button" type="button">
+            <strong>個人集計CSV</strong>
+            <span>スタッフごとの公休、日勤、遅出、入などを出力します。</span>
+          </button>
+          <button id="export-daily-summary-csv" class="export-choice-button" type="button">
+            <strong>日別集計CSV</strong>
+            <span>日ごとの日勤、深夜、準夜、遅出、Powerを出力します。</span>
+          </button>
+          <button id="export-warnings-csv" class="export-choice-button" type="button">
+            <strong>警告CSV</strong>
+            <span>日ごとの警告内容を一覧で出力します。</span>
+          </button>
+        </div>
+
+        <div class="dialog-actions export-dialog-actions">
+          <button id="export-dialog-cancel" class="secondary-button" type="button">キャンセル</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="day-note-dialog" class="day-note-dialog">
       <form id="day-note-form">
         <div class="dialog-heading">
@@ -402,6 +437,41 @@
       </form>
     </dialog>
 
+    <dialog id="custom-rule-dialog" class="custom-rule-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">CUSTOM RULE</p>
+            <h2>カスタム設定を追加</h2>
+          </div>
+          <button id="custom-rule-dialog-close" class="dialog-close" type="button" aria-label="閉じる">&times;</button>
+        </div>
+
+        <div class="custom-rule-choice-list" aria-label="追加するカスタム設定タイプ">
+          <button class="custom-rule-choice" type="button" data-custom-rule-choice="zero-suppression">
+            <strong>人数条件で警告・減点を無効化</strong>
+            <span>例：入が2人以上なら、遅出0の警告・減点を無効にする</span>
+          </button>
+          <button class="custom-rule-choice" type="button" data-custom-rule-choice="power-follow">
+            <strong>P値フォロー判定</strong>
+            <span>例：P1が入なら、P2以上のスタッフを入に1人以上必要にする</span>
+          </button>
+          <button class="custom-rule-choice" type="button" data-custom-rule-choice="power-count-excess">
+            <strong>P値人数超過判定</strong>
+            <span>例：P2以上の入が2人以上いる場合に警告・減点する</span>
+          </button>
+          <button class="custom-rule-choice" type="button" data-custom-rule-choice="ng-pair-shift">
+            <strong>NGペア勤務被り判定</strong>
+            <span>例：NGペアが同じ遅、または入と遅になる場合に警告・減点する</span>
+          </button>
+        </div>
+
+        <div class="dialog-actions custom-rule-dialog-actions">
+          <button id="custom-rule-dialog-cancel" class="secondary-button" type="button">キャンセル</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="shift-type-dialog" class="shift-type-dialog">
       <form id="shift-type-form">
         <div class="dialog-heading">
@@ -417,6 +487,12 @@
           <label class="dialog-field"><span>名称</span><input id="shift-type-name" type="text" maxlength="20" required /></label>
           <label class="dialog-field"><span>区分</span><select id="shift-type-category"></select></label>
           <label class="dialog-field"><span>色</span><input id="shift-type-color" type="color" value="#dcefe5" /></label>
+        </div>
+
+        <div class="shift-type-composition-fields">
+          <label class="dialog-field"><span>構成タイプ</span><select id="shift-type-composition"></select></label>
+          <label class="dialog-field half-day-field"><span>午前の勤務</span><select id="shift-type-morning"></select></label>
+          <label class="dialog-field half-day-field"><span>午後の勤務</span><select id="shift-type-afternoon"></select></label>
         </div>
 
         <fieldset class="shift-type-flags">

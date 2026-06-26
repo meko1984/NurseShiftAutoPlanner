@@ -61,8 +61,29 @@
     return data.shiftTypes?.find((type) => type.symbol === symbol) ?? null;
   }
 
+  function isHalfDayShiftType(type) {
+    return type?.compositionType === "half-day";
+  }
+
+  function getShiftParts(data, symbol) {
+    const type = getShiftType(data, symbol);
+    if (!type) return [];
+    if (!isHalfDayShiftType(type)) return [{ type, weight: 1 }];
+    return [type.morningShift, type.afternoonShift]
+      .map((partSymbol) => getShiftType(data, partSymbol))
+      .filter(Boolean)
+      .map((partType) => ({ type: partType, weight: 0.5 }));
+  }
+
+  function getShiftContribution(data, symbol, flag) {
+    return getShiftParts(data, symbol).reduce(
+      (sum, part) => sum + (part.type?.[flag] ? part.weight : 0),
+      0,
+    );
+  }
+
   function hasFlag(data, symbol, flag) {
-    return Boolean(getShiftType(data, symbol)?.[flag]);
+    return getShiftContribution(data, symbol, flag) > 0;
   }
 
   function isBuiltInRuleEnabled(data, id) {
@@ -115,6 +136,47 @@
     return violations;
   }
 
+  function staffMatchesPowerRule(staff, powerValue, powerMode) {
+    return powerMode === "exact" ? staff.power === powerValue : staff.power >= powerValue;
+  }
+
+  function getCustomPowerCountExcessViolations(data, year, month, day, target = "warning") {
+    const violations = [];
+    getActiveCustomRules(data, "power-count-excess").forEach((rule) => {
+      if (!customRuleTargetIncludes(rule, target)) return;
+      const matchedStaff = data.staff.filter(
+        (staff) => staffMatchesPowerRule(staff, Number(rule.powerValue) || 1, rule.powerMode) &&
+          getShift(data, staff.id, year, month, day) === rule.targetShift,
+      );
+      if (matchedStaff.length < (Number(rule.count) || 0)) return;
+      violations.push({ rule, matchedStaff });
+    });
+    return violations;
+  }
+
+  function getCustomNgPairShiftViolations(data, year, month, day, target = "warning") {
+    const violations = [];
+    const pairs = data.ngPairs ?? data.settings?.ngPairs ?? [];
+    getActiveCustomRules(data, "ng-pair-shift").forEach((rule) => {
+      if (!customRuleTargetIncludes(rule, target)) return;
+      pairs.forEach((pair) => {
+        const [firstId, secondId] = getPairIds(pair);
+        if (!firstId || !secondId || firstId === secondId) return;
+        const first = data.staff.find((staff) => staff.id === firstId);
+        const second = data.staff.find((staff) => staff.id === secondId);
+        if (!first || !second) return;
+        const firstShift = getShift(data, firstId, year, month, day);
+        const secondShift = getShift(data, secondId, year, month, day);
+        const isViolation = rule.pairMode === "cross"
+          ? (firstShift === rule.shiftA && secondShift === rule.shiftB) ||
+            (firstShift === rule.shiftB && secondShift === rule.shiftA)
+          : firstShift === rule.shiftA && secondShift === rule.shiftA;
+        if (isViolation) violations.push({ rule, first, second });
+      });
+    });
+    return violations;
+  }
+
   function hasCustomRuleReplacingJuniorNightSupport(data) {
     return getActiveCustomRules(data, "power-follow").some((rule) =>
       rule.conditionPower === 1 &&
@@ -127,14 +189,14 @@
 
   function getDailyTotals(assignments) {
     const data = assignments[0]?.data;
-    const dayStaff = assignments.filter(({ shift, shiftType }) => shiftType?.countsAsDay);
+    const dayStaff = assignments.filter(({ shift }) => getShiftContribution(data, shift, "countsAsDay") > 0);
     return {
       dayStaff,
-      dayCount: dayStaff.length,
-      dayPower: assignments.filter(({ shiftType }) => shiftType?.countsForPower).reduce((sum, { staff }) => sum + staff.power, 0),
-      nightStaff: assignments.filter(({ shiftType }) => shiftType?.countsAsEvening),
-      afterCount: assignments.filter(({ shiftType }) => shiftType?.countsAsDeepNight).length,
-      lateCount: assignments.filter(({ shiftType }) => shiftType?.countsAsLate).length,
+      dayCount: assignments.reduce((sum, { shift }) => sum + getShiftContribution(data, shift, "countsAsDay"), 0),
+      dayPower: assignments.reduce((sum, { staff, shift }) => sum + getShiftContribution(data, shift, "countsForPower") * staff.power, 0),
+      nightStaff: assignments.filter(({ shift }) => getShiftContribution(data, shift, "countsAsEvening") > 0),
+      afterCount: assignments.reduce((sum, { shift }) => sum + getShiftContribution(data, shift, "countsAsDeepNight"), 0),
+      lateCount: assignments.reduce((sum, { shift }) => sum + getShiftContribution(data, shift, "countsAsLate"), 0),
     };
   }
 
@@ -203,6 +265,7 @@
     const rules = getWarningRules(data);
     const assignments = getDailyAssignments(data, year, month, day).map((assignment) => ({
       ...assignment,
+      data,
       shiftType: getShiftType(data, assignment.shift),
     }));
     const totals = getDailyTotals(assignments);
@@ -311,6 +374,24 @@
       );
     });
 
+    getCustomPowerCountExcessViolations(data, year, month, day).forEach(({ rule, matchedStaff }) => {
+      const powerLabel = rule.powerMode === "exact" ? `P${rule.powerValue}` : `P${rule.powerValue}以上`;
+      warnings.push(
+        `カスタム設定：${powerLabel}のスタッフが${getShiftType(data, rule.targetShift)?.name ?? rule.targetShift}に${matchedStaff.length}人います。${rule.count}人未満にしてください。`,
+      );
+    });
+
+    getCustomNgPairShiftViolations(data, year, month, day).forEach(({ rule, first, second }) => {
+      const shiftALabel = getShiftType(data, rule.shiftA)?.name ?? rule.shiftA;
+      const shiftBLabel = getShiftType(data, rule.shiftB)?.name ?? rule.shiftB;
+      const condition = rule.pairMode === "cross"
+        ? `${shiftALabel}と${shiftBLabel}`
+        : `同じ${shiftALabel}`;
+      warnings.push(
+        `カスタム設定：NGペアの${first.name}さんと${second.name}さんが${condition}になっています。`,
+      );
+    });
+
     if (isBuiltInRuleEnabled(data, "ng-pair")) {
       warnings.push(...getNgPairWarnings(data, year, month, day));
     }
@@ -320,10 +401,9 @@
         const limits = staff.limits ?? {};
         const totals = { late: 0, evening: 0 };
         for (let targetDay = 1; targetDay <= daysInMonth; targetDay += 1) {
-          const type = getShiftType(data, getShift(data, staff.id, year, month, targetDay));
-          if (!type) continue;
-          if (type.countsAsEvening) totals.evening += 1;
-          if (type.countsAsLate) totals.late += 1;
+          const shift = getShift(data, staff.id, year, month, targetDay);
+          totals.evening += getShiftContribution(data, shift, "countsAsEvening");
+          totals.late += getShiftContribution(data, shift, "countsAsLate");
         }
         [["遅出", "late"], ["入", "evening"]]
           .forEach(([label, key]) => {
