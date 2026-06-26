@@ -65,6 +65,66 @@
     return Boolean(getShiftType(data, symbol)?.[flag]);
   }
 
+  function isBuiltInRuleEnabled(data, id) {
+    return data.settings?.builtInRules?.[id] !== false;
+  }
+
+  function countShiftBySymbol(data, year, month, day, symbol) {
+    return data.staff.filter((staff) => getShift(data, staff.id, year, month, day) === symbol).length;
+  }
+
+  function compareCustomCount(actual, expected, comparison) {
+    if (comparison === "lte") return actual <= expected;
+    if (comparison === "eq") return actual === expected;
+    return actual >= expected;
+  }
+
+  function customRuleTargetIncludes(rule, target) {
+    return rule.target === "both" || rule.target === target;
+  }
+
+  function getActiveCustomRules(data, type) {
+    return (data.settings?.customRules ?? [])
+      .filter((rule) => rule?.enabled !== false && (!type || rule.type === type));
+  }
+
+  function isCustomZeroSuppressed(data, year, month, day, targetShift, target) {
+    return getActiveCustomRules(data, "zero-suppression").some((rule) => {
+      if (rule.targetShift !== targetShift || !customRuleTargetIncludes(rule, target)) return false;
+      return compareCustomCount(
+        countShiftBySymbol(data, year, month, day, rule.conditionShift),
+        Number(rule.count) || 0,
+        rule.comparison,
+      );
+    });
+  }
+
+  function getCustomPowerFollowViolations(data, year, month, day) {
+    const violations = [];
+    getActiveCustomRules(data, "power-follow").forEach((rule) => {
+      const triggerStaff = data.staff.filter(
+        (staff) => staff.power === rule.conditionPower && getShift(data, staff.id, year, month, day) === rule.conditionShift,
+      );
+      if (!triggerStaff.length) return;
+      const supportCount = data.staff.filter(
+        (staff) => staff.power >= rule.requiredPowerMin && getShift(data, staff.id, year, month, day) === rule.requiredShift,
+      ).length;
+      if (supportCount >= rule.requiredCount) return;
+      violations.push({ rule, triggerStaff, supportCount });
+    });
+    return violations;
+  }
+
+  function hasCustomRuleReplacingJuniorNightSupport(data) {
+    return getActiveCustomRules(data, "power-follow").some((rule) =>
+      rule.conditionPower === 1 &&
+      rule.conditionShift === "入" &&
+      rule.requiredPowerMin === 2 &&
+      rule.requiredShift === "入" &&
+      rule.requiredCount >= 1
+    );
+  }
+
   function getDailyTotals(assignments) {
     const data = assignments[0]?.data;
     const dayStaff = assignments.filter(({ shift, shiftType }) => shiftType?.countsAsDay);
@@ -149,7 +209,7 @@
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const canCheckNextDay = day < daysInMonth;
 
-    if (totals.dayCount < rules.minDayStaff) {
+    if (isBuiltInRuleEnabled(data, "min-day-staff") && totals.dayCount < rules.minDayStaff) {
       warnings.push(
         `日勤人数不足：日勤${totals.dayCount}人。最低${rules.minDayStaff}人必要。`,
       );
@@ -158,35 +218,44 @@
     const hasMiddleOrVeteran = totals.dayStaff.some(
       ({ staff }) => staff.power === 2 || staff.power === 3,
     );
-    if (!hasMiddleOrVeteran) {
+    if (isBuiltInRuleEnabled(data, "middle-staff-day") && !hasMiddleOrVeteran) {
       warnings.push(
         "日勤の中堅以上不足：一人前相当（P2）または中堅相当（P3）が日勤にいません。",
       );
     }
 
-    if (totals.dayPower < rules.minDayPower) {
+    if (isBuiltInRuleEnabled(data, "min-day-power") && totals.dayPower < rules.minDayPower) {
       warnings.push(
         `Power不足：日勤Powerが${totals.dayPower}です。目安は${rules.minDayPower}以上です。`,
       );
     }
 
-    if (totals.nightStaff.length < rules.minEveningStaff) {
+    if (
+      isBuiltInRuleEnabled(data, "min-evening") &&
+      totals.nightStaff.length < rules.minEveningStaff &&
+      !(totals.nightStaff.length === 0 && isCustomZeroSuppressed(data, year, month, day, "入", "warning"))
+    ) {
       warnings.push(`準夜不足：入が${totals.nightStaff.length}人です。`);
     }
-    if (totals.afterCount < rules.minDeepNightStaff) {
+    if (
+      isBuiltInRuleEnabled(data, "min-deep-night") &&
+      totals.afterCount < rules.minDeepNightStaff &&
+      !(totals.afterCount === 0 && isCustomZeroSuppressed(data, year, month, day, "明", "warning"))
+    ) {
       warnings.push(`深夜不足：明が${totals.afterCount}人です。`);
     }
 
     assignments.forEach(({ staff, shift, shiftType }) => {
       const nextShift = getShift(data, staff.id, year, month, day + 1);
 
-      if (canCheckNextDay && shiftType?.requiredNext && nextShift !== shiftType.requiredNext) {
+      if (isBuiltInRuleEnabled(data, "required-next") && canCheckNextDay && shiftType?.requiredNext && nextShift !== shiftType.requiredNext) {
         warnings.push(`${staff.name}さん：${shiftType.name}の翌日が${getShiftType(data, shiftType.requiredNext)?.name ?? shiftType.requiredNext}ではありません。`);
       }
-      if (canCheckNextDay && shiftType?.forbiddenNext?.includes(nextShift)) {
+      if (isBuiltInRuleEnabled(data, "forbidden-next") && canCheckNextDay && shiftType?.forbiddenNext?.includes(nextShift)) {
         warnings.push(`${staff.name}さん：${shiftType.name}の翌日に禁止勤務（${getShiftType(data, nextShift)?.name ?? nextShift}）があります。`);
       }
       if (
+        isBuiltInRuleEnabled(data, "consecutive-work") &&
         shiftType?.countsForConsecutive &&
         hasConsecutiveWorkDays(data, staff.id, year, month, day, rules.consecutiveWorkDays)
       ) {
@@ -197,28 +266,30 @@
     const supportedNightExists = totals.nightStaff.some(({ staff }) => staff.power >= 2);
     const seniorNightCount = totals.nightStaff.filter(({ staff }) => staff.power >= 2).length;
     const juniorNightCount = totals.nightStaff.filter(({ staff }) => staff.power === 1).length;
-    totals.nightStaff
-      .filter(({ staff }) => staff.power === 1)
-      .forEach(({ staff }) => {
-        if (!supportedNightExists) {
-          warnings.push(
-            `${staff.name}さんが${getPowerLabel(1)}で入ですが、同日に一人前相当以上（P2以上）の入がいません。`,
-          );
-        }
-      });
+    if (isBuiltInRuleEnabled(data, "junior-night-support") && !hasCustomRuleReplacingJuniorNightSupport(data)) {
+      totals.nightStaff
+        .filter(({ staff }) => staff.power === 1)
+        .forEach(({ staff }) => {
+          if (!supportedNightExists) {
+            warnings.push(
+              `${staff.name}さんが${getPowerLabel(1)}で入ですが、同日に一人前相当以上（P2以上）の入がいません。`,
+            );
+          }
+        });
+    }
 
-    if (seniorNightCount >= 2) {
+    if (isBuiltInRuleEnabled(data, "senior-night-overlap") && seniorNightCount >= 2) {
       warnings.push("P2以上の入が複数います。夜勤の基本枠はP2以上1人を想定しています。");
     }
-    if (juniorNightCount >= 2) {
+    if (isBuiltInRuleEnabled(data, "junior-night-overlap") && juniorNightCount >= 2) {
       warnings.push("新人相当（P1）の入が複数います。新人夜勤は原則1人までを想定しています。");
     }
-    if (totals.nightStaff.length > rules.maxNightStaff) {
+    if (isBuiltInRuleEnabled(data, "night-staff-excess") && totals.nightStaff.length > rules.maxNightStaff) {
       warnings.push(
         `入が${rules.maxNightStaff + 1}人以上います。夜勤人数が多すぎる可能性があります。`,
       );
     }
-    if (totals.lateCount > rules.maxLateStaff) {
+    if (isBuiltInRuleEnabled(data, "late-staff-excess") && totals.lateCount > rules.maxLateStaff) {
       warnings.push(
         `遅出が${rules.maxLateStaff + 1}人以上います。遅出は1日${rules.maxLateStaff}人以下を想定しています。`,
       );
@@ -227,12 +298,22 @@
     if (
       totals.nightStaff.length === 1 &&
       totals.nightStaff[0].staff.power >= 2 &&
-      totals.lateCount === 0
+      totals.lateCount === 0 &&
+      isBuiltInRuleEnabled(data, "late-zero") &&
+      !isCustomZeroSuppressed(data, year, month, day, "遅", "warning")
     ) {
       warnings.push("通常夜勤ですが、遅出がいません。");
     }
 
-    warnings.push(...getNgPairWarnings(data, year, month, day));
+    getCustomPowerFollowViolations(data, year, month, day).forEach(({ rule, triggerStaff, supportCount }) => {
+      warnings.push(
+        `カスタム設定：P${rule.conditionPower}の${triggerStaff.map((item) => item.name).join("、")}さんが${getShiftType(data, rule.conditionShift)?.name ?? rule.conditionShift}です。P${rule.requiredPowerMin}以上のスタッフを${getShiftType(data, rule.requiredShift)?.name ?? rule.requiredShift}に${rule.requiredCount}人以上必要です。（現在${supportCount}人）`,
+      );
+    });
+
+    if (isBuiltInRuleEnabled(data, "ng-pair")) {
+      warnings.push(...getNgPairWarnings(data, year, month, day));
+    }
 
     if (day === daysInMonth) {
       data.staff.forEach((staff) => {
@@ -247,7 +328,7 @@
         [["遅出", "late"], ["入", "evening"]]
           .forEach(([label, key]) => {
             const limit = Number(limits[key]);
-            if (Number.isFinite(limit) && totals[key] > limit) {
+            if (isBuiltInRuleEnabled(data, "staff-limits") && Number.isFinite(limit) && totals[key] > limit) {
               warnings.push(`${staff.name}さんの${label}回数が上限を超えています。（${totals[key]}/${limit}）`);
             }
           });
@@ -262,7 +343,7 @@
               longest = Math.max(longest, current);
             } else current = 0;
           }
-          if (longest > consecutiveLimit) {
+          if (isBuiltInRuleEnabled(data, "staff-limits") && longest > consecutiveLimit) {
             warnings.push(`${staff.name}さんの連勤が上限を超えています。（${longest}/${consecutiveLimit}）`);
           }
         }

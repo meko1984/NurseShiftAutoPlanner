@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>管理者支援システム Ver0.6</title>
+    <title>管理者支援システム Ver0.7.2</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -49,9 +49,39 @@
         <button id="clear-shifts" class="clear-shifts-button" type="button">
           シフト表クリア
         </button>
+        <div class="export-actions" aria-label="CSV出力">
+          <button id="export-schedule-csv" class="compact-button" type="button">勤務表CSV</button>
+          <button id="export-staff-summary-csv" class="compact-button" type="button">個人集計CSV</button>
+          <button id="export-daily-summary-csv" class="compact-button" type="button">日別集計CSV</button>
+          <button id="export-warnings-csv" class="compact-button" type="button">警告CSV</button>
+        </div>
+        <button id="print-check" class="clear-shifts-button print-check-button" type="button">
+          印刷前チェック
+        </button>
         <button id="reset-app" class="reset-button" type="button">初期化</button>
       </div>
     </header>
+
+    <section class="print-cover" aria-label="印刷用ヘッダー">
+      <div>
+        <p class="print-kicker">提出前チェック用</p>
+        <h1>勤務予定表</h1>
+      </div>
+      <dl class="print-meta">
+        <div>
+          <dt>対象年月</dt>
+          <dd id="print-period">--</dd>
+        </div>
+        <div>
+          <dt>作成日</dt>
+          <dd id="print-created-date">--</dd>
+        </div>
+        <div>
+          <dt>バージョン</dt>
+          <dd id="print-version">Ver0.7.2</dd>
+        </div>
+      </dl>
+    </section>
 
     <main class="app-shell">
       <section class="schedule-panel" aria-labelledby="schedule-heading">
@@ -63,6 +93,9 @@
           <div class="schedule-tools">
             <button id="auto-adjust-shifts" class="auto-adjust-button" type="button">
               自動調整
+            </button>
+            <button id="apply-requests-to-shifts" class="auto-adjust-button request-apply-button" type="button">
+              希望を勤務表へ反映
             </button>
             <label class="highlight-color-control">
               <span>ハイライト色</span>
@@ -114,7 +147,7 @@
                 <p class="section-kicker">SHIFT PATTERNS</p>
                 <h2 id="pattern-heading">パターン管理</h2>
               </div>
-              <span class="version-badge">Ver0.6</span>
+              <span class="version-badge">Ver0.7.2</span>
             </div>
 
             <div id="pattern-list" class="pattern-list" role="group" aria-label="パターン選択"></div>
@@ -166,6 +199,16 @@
             <p class="staff-settings-help">各スタッフの自動対象と勤務回数上限を設定します。</p>
             <div id="staff-settings-list" class="staff-settings-list"></div>
           </section>
+
+          <section class="side-card custom-settings-card" aria-labelledby="custom-settings-heading">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">CUSTOM SETTINGS</p>
+                <h2 id="custom-settings-heading">カスタム設定</h2>
+              </div>
+            </div>
+            <div id="custom-settings" class="custom-settings"></div>
+          </section>
         </div>
       </section>
 
@@ -215,6 +258,13 @@
 
       </aside>
     </main>
+
+    <section class="print-notes" aria-label="印刷時の注意書き">
+      <p>
+        注意：この勤務予定表は提出前確認用です。警告、評点、自動配置、自動調整の結果を含め、最終確認は必ず人が行ってください。
+        <span class="print-request-note">「*」は希望勤務が登録されているセルを示します。</span>
+      </p>
+    </section>
 
     <div id="cell-editor" class="cell-editor" hidden>
       <p id="cell-editor-title">勤務を選択</p>
@@ -277,6 +327,44 @@
           <ul id="boundary-note-list" class="boundary-note-list"></ul>
         </section>
         <button class="secondary-button" value="close">閉じる</button>
+      </form>
+    </dialog>
+
+    <dialog id="day-note-dialog" class="day-note-dialog">
+      <form id="day-note-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="section-kicker">DAY EVENT</p>
+            <h2 id="day-note-dialog-title">行事予定編集</h2>
+          </div>
+          <button id="day-note-close" class="dialog-close" type="button" aria-label="閉じる">&times;</button>
+        </div>
+
+        <label class="dialog-field">
+          <span>行事予定名</span>
+          <input id="day-note-title" type="text" maxlength="40" autocomplete="off" />
+        </label>
+        <label class="dialog-field">
+          <span>メモ</span>
+          <textarea id="day-note-memo" rows="3" maxlength="160"></textarea>
+        </label>
+
+        <fieldset class="day-note-fieldset">
+          <legend>参加スタッフ</legend>
+          <div id="day-note-staff-list" class="day-note-staff-list"></div>
+        </fieldset>
+
+        <fieldset class="day-note-fieldset">
+          <legend>参加スタッフに設定する希望勤務</legend>
+          <div id="day-note-request-options" class="day-note-request-options"></div>
+        </fieldset>
+
+        <p id="day-note-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="day-note-delete" class="secondary-button danger-button" type="button">削除</button>
+          <button id="day-note-cancel" class="secondary-button" type="button">キャンセル</button>
+          <button class="primary-button dialog-primary" type="submit">保存</button>
+        </div>
       </form>
     </dialog>
 

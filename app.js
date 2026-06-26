@@ -1,7 +1,8 @@
 "use strict";
 
 const STORAGE_KEY = "autoShiftTool.data";
-const DATA_VERSION = 6;
+const DATA_VERSION = 7.2;
+const APP_VERSION = "0.7.2";
 const SHIFT_TYPE_CATEGORIES = ["日勤", "遅出", "準夜", "深夜", "休み", "有休", "その他勤務", "その他休み"];
 const SHIFT_TYPE_FLAGS = [
   "isWork", "isRest", "countsAsDay", "countsAsLate", "countsAsEvening",
@@ -79,6 +80,42 @@ const DEFAULT_WARNING_RULES = {
   minDeepNightStaff: 1,
   minEveningStaff: 1,
 };
+const CUSTOM_RULE_TYPES = {
+  ZERO_SUPPRESSION: "zero-suppression",
+  POWER_FOLLOW: "power-follow",
+};
+const CUSTOM_RULE_TARGETS = ["warning", "score", "both"];
+const CUSTOM_RULE_COMPARISONS = ["gte", "lte", "eq"];
+const CUSTOM_RULE_COMPARISON_LABELS = {
+  gte: "以上",
+  lte: "以下",
+  eq: "ちょうど",
+};
+const CUSTOM_RULE_TARGET_LABELS = {
+  warning: "警告",
+  score: "減点",
+  both: "警告と減点",
+};
+const BUILT_IN_RULE_DEFINITIONS = [
+  { id: "min-day-staff", label: "日勤最低人数", detail: "日勤人数がルール設定の最低人数を下回る場合に警告・減点します。" },
+  { id: "min-day-power", label: "日勤Power不足", detail: "日勤Powerがルール設定の最低値を下回る場合に警告・減点します。" },
+  { id: "middle-staff-day", label: "日勤P2/P3なし", detail: "日勤にP2またはP3がいない場合に警告・減点します。" },
+  { id: "min-evening", label: "準夜不足", detail: "入の人数がルール設定の最低人数を下回る場合に警告・減点します。" },
+  { id: "min-deep-night", label: "深夜不足", detail: "明の人数がルール設定の最低人数を下回る場合に警告・減点します。" },
+  { id: "late-zero", label: "遅出0", detail: "遅出が0人の日を減点し、通常夜勤で遅出0の場合は警告します。" },
+  { id: "required-next", label: "翌日に必要な勤務", detail: "勤務形態設定の翌日必要勤務に合わない場合に警告・減点します。" },
+  { id: "forbidden-next", label: "翌日に禁止する勤務", detail: "勤務形態設定の翌日禁止勤務に該当する場合に警告・減点します。" },
+  { id: "consecutive-work", label: "連勤警告", detail: "連勤日数がルール設定の警告日数以上の場合に警告・減点します。" },
+  { id: "junior-night-support", label: "P1入フォロー不足", detail: "P1が入で同日にP2以上の入がいない場合に警告・減点します。" },
+  { id: "senior-night-overlap", label: "P2以上の入被り", detail: "P2以上の入が複数いる場合に警告・減点します。" },
+  { id: "junior-night-overlap", label: "P1入の複数配置", detail: "P1の入が複数いる場合に警告・減点します。" },
+  { id: "night-staff-excess", label: "入最大人数超過", detail: "入の人数がルール設定の最大人数を超える場合に警告・減点します。" },
+  { id: "late-staff-excess", label: "遅出最大人数超過", detail: "遅出の人数がルール設定の最大人数を超える場合に警告・減点します。" },
+  { id: "ng-pair", label: "NGペア被り", detail: "NGペアが同じ日勤または同じ入になる場合に警告・減点します。" },
+  { id: "public-holiday-target", label: "公休目標日数", detail: "公休数がルール設定の目標日数と異なる場合に減点します。" },
+  { id: "staff-balance", label: "勤務回数バランス", detail: "スタッフ間の日勤回数差・入回数差が大きい場合に減点します。" },
+  { id: "staff-limits", label: "スタッフ別上限", detail: "スタッフ別の遅出・入・連勤上限を超える場合に警告・減点します。" },
+];
 
 const RULE_MIN_VALUES = {
   minDayStaff: 0,
@@ -113,7 +150,45 @@ const SCORE_RULES = {
   nightStaffExcess: 2,
   lateStaffExcess: 2,
   staffLimitExceeded: 3,
+  customPowerFollow: 5,
 };
+
+function createDefaultCustomRules() {
+  return [];
+}
+
+function createDefaultBuiltInRuleSettings() {
+  return Object.fromEntries(BUILT_IN_RULE_DEFINITIONS.map((rule) => [rule.id, true]));
+}
+
+function createCustomRuleId(type) {
+  return `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createCustomRuleTemplate(type) {
+  if (type === CUSTOM_RULE_TYPES.POWER_FOLLOW) {
+    return {
+      id: createCustomRuleId(type),
+      type,
+      enabled: true,
+      conditionPower: 1,
+      conditionShift: "入",
+      requiredPowerMin: 2,
+      requiredShift: "入",
+      requiredCount: 1,
+    };
+  }
+  return {
+    id: createCustomRuleId(CUSTOM_RULE_TYPES.ZERO_SUPPRESSION),
+    type: CUSTOM_RULE_TYPES.ZERO_SUPPRESSION,
+    enabled: true,
+    conditionShift: "入",
+    count: 2,
+    comparison: "gte",
+    targetShift: "遅",
+    target: "both",
+  };
+}
 
 function createInitialData() {
   const now = new Date();
@@ -158,6 +233,8 @@ function createInitialData() {
     settings: {
       selectedPatternId: "pattern-1",
       warningRules: { ...DEFAULT_WARNING_RULES },
+      customRules: createDefaultCustomRules(),
+      builtInRules: createDefaultBuiltInRuleSettings(),
       generation: {},
       highlightColor: "#2e7d5c",
     },
@@ -235,6 +312,119 @@ function normalizeStaffLimits(savedLimits = {}) {
   );
 }
 
+function normalizeCustomRules(savedRules, validShiftSymbols) {
+  if (isLegacyDefaultCustomRules(savedRules)) return [];
+  const source = Array.isArray(savedRules) ? savedRules : [];
+  const normalized = source
+    .filter((rule) => rule && typeof rule === "object")
+    .map((saved, index) => {
+      const type = Object.values(CUSTOM_RULE_TYPES).includes(saved.type) ? saved.type : CUSTOM_RULE_TYPES.ZERO_SUPPRESSION;
+      const template = createCustomRuleTemplate(type);
+      const base = {
+        ...template,
+        id: typeof saved.id === "string" && saved.id ? saved.id : `${template.type}-${index + 1}`,
+        enabled: saved.enabled !== false,
+      };
+
+    if (type === CUSTOM_RULE_TYPES.ZERO_SUPPRESSION) {
+      const conditionShift = validShiftSymbols.has(saved.conditionShift) ? saved.conditionShift : base.conditionShift;
+      const targetShift = validShiftSymbols.has(saved.targetShift) ? saved.targetShift : base.targetShift;
+      const comparison = CUSTOM_RULE_COMPARISONS.includes(saved.comparison) ? saved.comparison : base.comparison;
+      const target = CUSTOM_RULE_TARGETS.includes(saved.target) ? saved.target : base.target;
+      const count = Number(saved.count);
+      return {
+        ...base,
+        conditionShift,
+        targetShift,
+        comparison,
+        target,
+        count: Number.isFinite(count) ? Math.max(0, Math.min(31, count)) : base.count,
+      };
+    }
+
+    if (type === CUSTOM_RULE_TYPES.POWER_FOLLOW) {
+      const conditionPower = Number(saved.conditionPower);
+      const requiredPowerMin = Number(saved.requiredPowerMin);
+      const requiredCount = Number(saved.requiredCount);
+      return {
+        ...base,
+        conditionPower: [1, 2, 3, 4].includes(conditionPower) ? conditionPower : base.conditionPower,
+        conditionShift: validShiftSymbols.has(saved.conditionShift) ? saved.conditionShift : base.conditionShift,
+        requiredPowerMin: [1, 2, 3, 4].includes(requiredPowerMin) ? requiredPowerMin : base.requiredPowerMin,
+        requiredShift: validShiftSymbols.has(saved.requiredShift) ? saved.requiredShift : base.requiredShift,
+        requiredCount: Number.isFinite(requiredCount) ? Math.max(0, Math.min(31, requiredCount)) : base.requiredCount,
+      };
+    }
+
+    return base;
+  })
+  .filter(Boolean);
+  return normalized;
+}
+
+function normalizeBuiltInRuleSettings(savedRules = {}) {
+  const defaults = createDefaultBuiltInRuleSettings();
+  return Object.fromEntries(
+    Object.keys(defaults).map((id) => [id, savedRules?.[id] !== false]),
+  );
+}
+
+function isLegacyDefaultCustomRules(rules) {
+  if (!Array.isArray(rules) || rules.length !== 2) return false;
+  const zero = rules.find((rule) => rule?.id === "zero-suppression-1");
+  const follow = rules.find((rule) => rule?.id === "power-follow-1");
+  return Boolean(
+    zero &&
+      follow &&
+      zero.type === CUSTOM_RULE_TYPES.ZERO_SUPPRESSION &&
+      zero.enabled !== false &&
+      zero.conditionShift === "入" &&
+      Number(zero.count) === 2 &&
+      zero.comparison === "gte" &&
+      zero.targetShift === "遅" &&
+      zero.target === "both" &&
+      follow.type === CUSTOM_RULE_TYPES.POWER_FOLLOW &&
+      follow.enabled !== false &&
+      Number(follow.conditionPower) === 1 &&
+      follow.conditionShift === "入" &&
+      Number(follow.requiredPowerMin) === 2 &&
+      follow.requiredShift === "入" &&
+      Number(follow.requiredCount) === 1,
+  );
+}
+
+function normalizeDayNotes(savedNotes, staff) {
+  if (!savedNotes || typeof savedNotes !== "object") return {};
+  const staffIds = new Set(staff.map((item) => item.id));
+  return Object.fromEntries(
+    Object.entries(savedNotes).map(([monthKey, monthNotes]) => {
+      if (!monthNotes || typeof monthNotes !== "object") return [monthKey, {}];
+      return [
+        monthKey,
+        Object.fromEntries(
+          Object.entries(monthNotes)
+            .map(([day, note]) => {
+              if (typeof note === "string") {
+                const title = note.trim();
+                return title ? [day, { title, memo: "", participantIds: [], requestShift: "" }] : null;
+              }
+              if (!note || typeof note !== "object") return null;
+              const title = String(note.title ?? note.name ?? "").trim();
+              const memo = String(note.memo ?? note.note ?? "").trim();
+              const participantIds = Array.isArray(note.participantIds)
+                ? note.participantIds.filter((id) => staffIds.has(id))
+                : [];
+              const requestShift = typeof note.requestShift === "string" ? note.requestShift : "";
+              if (!title && !memo && !participantIds.length && !requestShift) return null;
+              return [day, { title, memo, participantIds, requestShift }];
+            })
+            .filter(Boolean),
+        ),
+      ];
+    }),
+  );
+}
+
 function normalizeData(saved) {
   const initial = createInitialData();
   if (!saved || typeof saved !== "object") return initial;
@@ -297,8 +487,7 @@ function normalizeData(saved) {
         : saved.settings?.requests && typeof saved.settings.requests === "object"
           ? saved.settings.requests
           : {},
-    dayNotes:
-      saved.dayNotes && typeof saved.dayNotes === "object" ? saved.dayNotes : {},
+    dayNotes: normalizeDayNotes(saved.dayNotes, staff),
     ngPairs: normalizeNgPairs(savedNgPairs, staff),
     patterns,
     settings: {
@@ -307,6 +496,8 @@ function normalizeData(saved) {
         ? selectedPatternId
         : patterns[0]?.id ?? null,
       warningRules: normalizeWarningRules(saved.settings?.warningRules),
+      customRules: normalizeCustomRules(saved.settings?.customRules, validShiftSymbols),
+      builtInRules: normalizeBuiltInRuleSettings(saved.settings?.builtInRules),
       generation:
         saved.settings?.generation && typeof saved.settings.generation === "object"
           ? saved.settings.generation
@@ -345,6 +536,7 @@ const uiState = {
   editingStaffId: null,
   editingPatternId: null,
   editingShiftTypeSymbol: null,
+  editingDayNote: null,
   patternDraft: [],
   inputMode: "shift",
   scorePanelPinned: false,
@@ -367,6 +559,7 @@ const elements = {
   addStaff: document.querySelector("#add-staff"),
   staffSettingsList: document.querySelector("#staff-settings-list"),
   ruleSettings: document.querySelector("#rule-settings"),
+  customSettings: document.querySelector("#custom-settings"),
   shiftTypeLegend: document.querySelector("#shift-type-legend"),
   shiftTypeList: document.querySelector("#shift-type-list"),
   addShiftType: document.querySelector("#add-shift-type"),
@@ -381,6 +574,15 @@ const elements = {
   deletePattern: document.querySelector("#delete-pattern"),
   autoPlacePatterns: document.querySelector("#auto-place-patterns"),
   autoAdjustShifts: document.querySelector("#auto-adjust-shifts"),
+  applyRequestsToShifts: document.querySelector("#apply-requests-to-shifts"),
+  exportScheduleCsv: document.querySelector("#export-schedule-csv"),
+  exportStaffSummaryCsv: document.querySelector("#export-staff-summary-csv"),
+  exportDailySummaryCsv: document.querySelector("#export-daily-summary-csv"),
+  exportWarningsCsv: document.querySelector("#export-warnings-csv"),
+  printCheck: document.querySelector("#print-check"),
+  printPeriod: document.querySelector("#print-period"),
+  printCreatedDate: document.querySelector("#print-created-date"),
+  printVersion: document.querySelector("#print-version"),
   autoPlacementResult: document.querySelector("#auto-placement-result"),
   cellEditor: document.querySelector("#cell-editor"),
   cellEditorTitle: document.querySelector("#cell-editor-title"),
@@ -400,6 +602,17 @@ const elements = {
   warningList: document.querySelector("#warning-list"),
   boundaryNoteSection: document.querySelector("#boundary-note-section"),
   boundaryNoteList: document.querySelector("#boundary-note-list"),
+  dayNoteDialog: document.querySelector("#day-note-dialog"),
+  dayNoteForm: document.querySelector("#day-note-form"),
+  dayNoteDialogTitle: document.querySelector("#day-note-dialog-title"),
+  dayNoteTitle: document.querySelector("#day-note-title"),
+  dayNoteMemo: document.querySelector("#day-note-memo"),
+  dayNoteStaffList: document.querySelector("#day-note-staff-list"),
+  dayNoteRequestOptions: document.querySelector("#day-note-request-options"),
+  dayNoteError: document.querySelector("#day-note-error"),
+  dayNoteClose: document.querySelector("#day-note-close"),
+  dayNoteCancel: document.querySelector("#day-note-cancel"),
+  dayNoteDelete: document.querySelector("#day-note-delete"),
   patternDialog: document.querySelector("#pattern-dialog"),
   patternEditorForm: document.querySelector("#pattern-editor-form"),
   patternDialogTitle: document.querySelector("#pattern-dialog-title"),
@@ -457,11 +670,21 @@ function getDaysInMonth() {
   return new Date(appData.display.year, appData.display.month + 1, 0).getDate();
 }
 
+function formatJapaneseEraDate(year, month, day) {
+  if (year >= 2019) return `令和${year - 2018}年${month}月${day}日`;
+  if (year >= 1989) return `平成${year - 1988}年${month}月${day}日`;
+  return `${year}年${month}月${day}日`;
+}
+
 function getWarningRules() {
   return {
     ...DEFAULT_WARNING_RULES,
     ...(appData.settings.warningRules ?? {}),
   };
+}
+
+function isBuiltInRuleEnabled(id) {
+  return appData.settings.builtInRules?.[id] !== false;
 }
 
 function getShiftTypes() {
@@ -501,15 +724,41 @@ function getRequest(staffId, day) {
   return appData.requests[getMonthKey()]?.[staffId]?.[day] ?? "";
 }
 
+function createEmptyDayNote() {
+  return { title: "", memo: "", participantIds: [], requestShift: "" };
+}
+
+function normalizeDayNoteValue(note) {
+  if (typeof note === "string") {
+    return { ...createEmptyDayNote(), title: note.trim() };
+  }
+  if (!note || typeof note !== "object") return createEmptyDayNote();
+  return {
+    title: String(note.title ?? note.name ?? "").trim(),
+    memo: String(note.memo ?? note.note ?? "").trim(),
+    participantIds: Array.isArray(note.participantIds) ? note.participantIds : [],
+    requestShift: typeof note.requestShift === "string" ? note.requestShift : "",
+  };
+}
+
 function getDayNote(day) {
-  return appData.dayNotes?.[getMonthKey()]?.[day] ?? "";
+  return normalizeDayNoteValue(appData.dayNotes?.[getMonthKey()]?.[day]);
+}
+
+function getDayNoteDisplay(day) {
+  const note = getDayNote(day);
+  return note.title;
+}
+
+function hasDayNoteContent(note) {
+  return Boolean(note.title || note.memo || note.participantIds.length || note.requestShift);
 }
 
 function setDayNote(day, note) {
   const monthKey = getMonthKey();
   appData.dayNotes[monthKey] ??= {};
-  const value = note.trim();
-  if (value) {
+  const value = normalizeDayNoteValue(note);
+  if (hasDayNoteContent(value)) {
     appData.dayNotes[monthKey][day] = value;
   } else {
     delete appData.dayNotes[monthKey][day];
@@ -556,6 +805,12 @@ function createShiftMark(shift) {
   return `<span class="shift-mark ${SHIFT_CLASS[shift] ?? "shift-custom"}" ${getShiftStyle(type)} title="${escapeHtml(type?.name ?? shift)}">${escapeHtml(shift)}</span>`;
 }
 
+function createShiftBadgeLabel(shift) {
+  if (!shift) return '<span class="shift-badge-label"><span class="shift-mark shift-blank">空</span><span>空欄</span></span>';
+  const type = getShiftType(shift);
+  return `<span class="shift-badge-label">${createShiftMark(shift)}<span>${escapeHtml(type?.name ?? shift)}</span></span>`;
+}
+
 function createPatternShiftMark(shift) {
   if (!shift) return '<span class="shift-mark shift-blank">空</span>';
   return createShiftMark(shift);
@@ -565,13 +820,19 @@ function createCellDisplay(shift, request) {
   const value = shift || request;
   if (!value) return "";
 
+  const printValue = request ? `*${value}` : value;
   if (value === "日/遅") {
-    return `<span class="request-only-mark">日/遅<span class="request-star">*</span></span>`;
+    return `<span class="screen-cell-value"><span class="request-only-mark">日/遅<span class="request-star">*</span></span></span><span class="print-cell-value">${escapeHtml(printValue)}</span>`;
   }
 
-  return `<span class="shift-mark ${SHIFT_CLASS[value] ?? "shift-custom"} ${
+  return `<span class="screen-cell-value"><span class="shift-mark ${SHIFT_CLASS[value] ?? "shift-custom"} ${
     !shift && request ? "request-only-mark" : ""
-  }" ${getShiftStyle(getShiftType(value))}>${escapeHtml(value)}${request ? '<span class="request-star">*</span>' : ""}</span>`;
+  }" ${getShiftStyle(getShiftType(value))}>${escapeHtml(value)}${request ? '<span class="request-star">*</span>' : ""}</span></span><span class="print-cell-value">${escapeHtml(printValue)}</span>`;
+}
+
+function getPrintShiftShadeClass(shift) {
+  if (shift === "入" || shift === "明") return "print-shift-shade";
+  return "";
 }
 
 function getDayType(day) {
@@ -593,7 +854,7 @@ function renderSchedule() {
 
   html += '<th class="name-column" rowspan="3">氏名</th>';
   for (let day = 1; day <= daysInMonth; day += 1) {
-    const note = getDayNote(day);
+    const note = getDayNoteDisplay(day);
     html += `<th class="day-column event-column ${getDayType(day)}" data-day="${day}">
       <button class="day-note-button" type="button" data-note-day="${day}" title="${escapeHtml(note || "行事予定を入力")}">${escapeHtml(note)}</button>
     </th>`;
@@ -622,7 +883,7 @@ function renderSchedule() {
       const request = getRequest(staff.id, day);
       const displayLabel = shift || request || "空欄";
       html += `
-        <td class="day-column shift-cell ${getDayType(day)} ${request ? "has-request" : ""}" data-day="${day}">
+        <td class="day-column shift-cell ${getDayType(day)} ${getPrintShiftShadeClass(shift)} ${request ? "has-request" : ""}" data-day="${day}">
           <button
             class="shift-button"
             type="button"
@@ -663,7 +924,7 @@ function renderSchedule() {
         }</td>`;
       } else {
         const totals = getDailyTotals(day);
-        const statusClass = getDailyTotalStatusClass(row.key, totals[row.key]);
+        const statusClass = getDailyTotalStatusClass(row.key, totals[row.key], day);
         html += `<td class="${statusClass}" data-day="${day}">${totals[row.key]}</td>`;
       }
     }
@@ -673,27 +934,48 @@ function renderSchedule() {
   elements.scheduleTable.innerHTML = `${html}</tbody>`;
 }
 
-function getDailyTotalStatusClass(key, value) {
+function getDailyTotalStatusClass(key, value, day = null) {
   const rules = getWarningRules();
+  const suppressesZeroWarning = (symbol) =>
+    day !== null && value === 0 && isCustomZeroSuppressed(day, symbol, "warning");
+  const hasPowerFollowDanger = (symbol) =>
+    day !== null &&
+    getShiftTotalKey(symbol) === key &&
+    getCustomPowerFollowViolations(day).some((violation) => violation.rule.requiredShift === symbol);
   if (key === "power") {
+    if (!isBuiltInRuleEnabled("min-day-power")) return "status-ok";
     if (value < rules.minDayPower - 2) return "status-danger";
     if (value < rules.minDayPower) return "status-warn";
     return "status-ok";
   }
   if (key === "day") {
+    const symbol = getShiftTypes().find((type) => type.countsAsDay)?.symbol;
+    if (symbol && hasPowerFollowDanger(symbol)) return "status-danger";
+    if (!isBuiltInRuleEnabled("min-day-staff")) return "status-ok";
     if (value < rules.minDayStaff) return "status-danger";
     return "status-ok";
   }
   if (key === "deepNight") {
+    const symbol = getShiftTypes().find((type) => type.countsAsDeepNight)?.symbol;
+    if (symbol && suppressesZeroWarning(symbol)) return "status-ok";
+    if (symbol && hasPowerFollowDanger(symbol)) return "status-danger";
+    if (!isBuiltInRuleEnabled("min-deep-night")) return "status-ok";
     return value < rules.minDeepNightStaff ? "status-danger" : "status-ok";
   }
   if (key === "evening") {
-    if (value < rules.minEveningStaff || value > rules.maxNightStaff) return "status-danger";
+    const symbol = getShiftTypes().find((type) => type.countsAsEvening)?.symbol;
+    if (symbol && suppressesZeroWarning(symbol)) return "status-ok";
+    if (symbol && hasPowerFollowDanger(symbol)) return "status-danger";
+    if (isBuiltInRuleEnabled("min-evening") && value < rules.minEveningStaff) return "status-danger";
+    if (isBuiltInRuleEnabled("night-staff-excess") && value > rules.maxNightStaff) return "status-danger";
     return "status-ok";
   }
   if (key === "late") {
-    if (value > rules.maxLateStaff) return "status-danger";
-    return value === 0 ? "status-warn" : "status-ok";
+    const symbol = getShiftTypes().find((type) => type.countsAsLate)?.symbol;
+    if (symbol && suppressesZeroWarning(symbol)) return "status-ok";
+    if (symbol && hasPowerFollowDanger(symbol)) return "status-danger";
+    if (isBuiltInRuleEnabled("late-staff-excess") && value > rules.maxLateStaff) return "status-danger";
+    return isBuiltInRuleEnabled("late-zero") && value === 0 ? "status-warn" : "status-ok";
   }
   return "";
 }
@@ -711,6 +993,99 @@ function getDailyTotals(day) {
     if (type.countsAsLate) totals.late += 1;
   });
   return totals;
+}
+
+function countShiftBySymbol(day, symbol) {
+  return appData.staff.filter((staff) => getShift(staff.id, day) === symbol).length;
+}
+
+function compareCustomCount(actual, expected, comparison) {
+  if (comparison === "lte") return actual <= expected;
+  if (comparison === "eq") return actual === expected;
+  return actual >= expected;
+}
+
+function getActiveCustomRules(type = null) {
+  return (appData.settings.customRules ?? [])
+    .filter((rule) => rule.enabled !== false && (!type || rule.type === type));
+}
+
+function customRuleTargetIncludes(rule, target) {
+  return rule.target === "both" || rule.target === target;
+}
+
+function isCustomZeroSuppressed(day, targetShift, target) {
+  return getActiveCustomRules(CUSTOM_RULE_TYPES.ZERO_SUPPRESSION).some((rule) => {
+    if (rule.targetShift !== targetShift || !customRuleTargetIncludes(rule, target)) return false;
+    return compareCustomCount(
+      countShiftBySymbol(day, rule.conditionShift),
+      Number(rule.count) || 0,
+      rule.comparison,
+    );
+  });
+}
+
+function getCustomZeroScoreWarningSuppressionCount(day) {
+  const totals = getDailyTotals(day);
+  const rules = getWarningRules();
+  return getActiveCustomRules(CUSTOM_RULE_TYPES.ZERO_SUPPRESSION).filter((rule) => {
+    if (!customRuleTargetIncludes(rule, "score") || customRuleTargetIncludes(rule, "warning")) return false;
+    if (countShiftBySymbol(day, rule.targetShift) !== 0) return false;
+    const totalKey = getShiftTotalKey(rule.targetShift);
+    const hasZeroWarning =
+      (totalKey === "deepNight" && totals.deepNight < rules.minDeepNightStaff) ||
+      (totalKey === "evening" && totals.evening < rules.minEveningStaff) ||
+      (totalKey === "late" && totals.late === 0);
+    if (!hasZeroWarning) return false;
+    return compareCustomCount(
+      countShiftBySymbol(day, rule.conditionShift),
+      Number(rule.count) || 0,
+      rule.comparison,
+    );
+  }).length;
+}
+
+function getShiftTotalKey(symbol) {
+  const type = getShiftType(symbol);
+  if (type?.countsAsDay) return "day";
+  if (type?.countsAsDeepNight) return "deepNight";
+  if (type?.countsAsEvening) return "evening";
+  if (type?.countsAsLate) return "late";
+  return "";
+}
+
+function hasCustomPowerFollowViolation(day) {
+  return getCustomPowerFollowViolations(day).length > 0;
+}
+
+function getCustomPowerFollowViolations(day) {
+  const violations = [];
+  getActiveCustomRules(CUSTOM_RULE_TYPES.POWER_FOLLOW).forEach((rule) => {
+    const triggerStaff = appData.staff.filter(
+      (staff) => staff.power === rule.conditionPower && getShift(staff.id, day) === rule.conditionShift,
+    );
+    if (!triggerStaff.length) return;
+    const supportCount = appData.staff.filter(
+      (staff) => staff.power >= rule.requiredPowerMin && getShift(staff.id, day) === rule.requiredShift,
+    ).length;
+    if (supportCount >= rule.requiredCount) return;
+    violations.push({
+      rule,
+      triggerStaff,
+      supportCount,
+    });
+  });
+  return violations;
+}
+
+function hasCustomRuleReplacingJuniorNightSupport() {
+  return getActiveCustomRules(CUSTOM_RULE_TYPES.POWER_FOLLOW).some((rule) =>
+    rule.conditionPower === 1 &&
+    rule.conditionShift === "入" &&
+    rule.requiredPowerMin === 2 &&
+    rule.requiredShift === "入" &&
+    rule.requiredCount >= 1
+  );
 }
 
 function getWarnings(day) {
@@ -854,21 +1229,23 @@ function getScoreRuleViolations(day) {
   const juniorNightCount = nightStaff.filter((staff) => staff.power === 1).length;
   const lateCount = appData.staff.filter((staff) => isShiftTypeFlag(getShift(staff.id, day), "countsAsLate")).length;
 
-  if (!dayStaff.some((staff) => staff.power === 2 || staff.power === 3)) {
+  if (isBuiltInRuleEnabled("middle-staff-day") && !dayStaff.some((staff) => staff.power === 2 || staff.power === 3)) {
     violations.middleStaffShortage += 1;
   }
 
   const hasSeniorNightStaff = seniorNightCount > 0;
-  nightStaff
-    .filter((staff) => staff.power === 1)
-    .forEach(() => {
-      if (!hasSeniorNightStaff) violations.juniorNightSupport += 1;
-    });
+  if (isBuiltInRuleEnabled("junior-night-support") && !hasCustomRuleReplacingJuniorNightSupport()) {
+    nightStaff
+      .filter((staff) => staff.power === 1)
+      .forEach(() => {
+        if (!hasSeniorNightStaff) violations.juniorNightSupport += 1;
+      });
+  }
 
-  if (seniorNightCount > 1) violations.seniorNightOverlap += 1;
-  if (juniorNightCount >= 2) violations.juniorNightOverlap += 1;
-  if (nightStaff.length > rules.maxNightStaff) violations.nightStaffExcess += 1;
-  if (lateCount > rules.maxLateStaff) violations.lateStaffExcess += 1;
+  if (isBuiltInRuleEnabled("senior-night-overlap") && seniorNightCount > 1) violations.seniorNightOverlap += 1;
+  if (isBuiltInRuleEnabled("junior-night-overlap") && juniorNightCount >= 2) violations.juniorNightOverlap += 1;
+  if (isBuiltInRuleEnabled("night-staff-excess") && nightStaff.length > rules.maxNightStaff) violations.nightStaffExcess += 1;
+  if (isBuiltInRuleEnabled("late-staff-excess") && lateCount > rules.maxLateStaff) violations.lateStaffExcess += 1;
 
   appData.staff.forEach((staff) => {
     const shift = getShift(staff.id, day);
@@ -876,14 +1253,14 @@ function getScoreRuleViolations(day) {
     const canCheckNextDay = day < getDaysInMonth();
 
     const type = getShiftType(shift);
-    if (canCheckNextDay && type?.requiredNext && nextShift !== type.requiredNext) {
+    if (isBuiltInRuleEnabled("required-next") && canCheckNextDay && type?.requiredNext && nextShift !== type.requiredNext) {
       if (type.countsAsEvening) violations.nightToAfter += 1;
       else if (type.countsAsDeepNight) violations.afterToOff += 1;
     }
-    if (canCheckNextDay && type?.forbiddenNext?.includes(nextShift)) {
+    if (isBuiltInRuleEnabled("forbidden-next") && canCheckNextDay && type?.forbiddenNext?.includes(nextShift)) {
       violations.lateNextDay += 1;
     }
-    if (hasConsecutiveWorkDays(staff.id, day, rules.consecutiveWorkDays)) {
+    if (isBuiltInRuleEnabled("consecutive-work") && hasConsecutiveWorkDays(staff.id, day, rules.consecutiveWorkDays)) {
       violations.sixConsecutiveWorkDays += 1;
     }
   });
@@ -891,8 +1268,8 @@ function getScoreRuleViolations(day) {
   appData.ngPairs.forEach(([firstId, secondId]) => {
     const firstShift = getShift(firstId, day);
     const secondShift = getShift(secondId, day);
-    if (isShiftTypeFlag(firstShift, "countsAsEvening") && isShiftTypeFlag(secondShift, "countsAsEvening")) violations.ngPairNight += 1;
-    if (isShiftTypeFlag(firstShift, "countsAsDay") && isShiftTypeFlag(secondShift, "countsAsDay")) violations.ngPairDay += 1;
+    if (isBuiltInRuleEnabled("ng-pair") && isShiftTypeFlag(firstShift, "countsAsEvening") && isShiftTypeFlag(secondShift, "countsAsEvening")) violations.ngPairNight += 1;
+    if (isBuiltInRuleEnabled("ng-pair") && isShiftTypeFlag(firstShift, "countsAsDay") && isShiftTypeFlag(secondShift, "countsAsDay")) violations.ngPairDay += 1;
   });
 
   return violations;
@@ -944,18 +1321,23 @@ function calculateShiftScore() {
     publicHolidayMismatch: 0,
     dayCountImbalance: 0,
     nightCountImbalance: 0,
+    customPowerFollow: 0,
   };
   const staffLimitItems = [];
 
   for (let day = 1; day <= getDaysInMonth(); day += 1) {
     const totals = getDailyTotals(day);
     const warnings = getWarnings(day);
-    counts.warning += warnings.length;
-    if (totals.power < rules.minDayPower) counts.powerShortage += 1;
-    if (totals.day < rules.minDayStaff) counts.dayShortage += 1;
-    if (totals.deepNight < rules.minDeepNightStaff) counts.deepNightZero += 1;
-    if (totals.evening < rules.minEveningStaff) counts.eveningZero += 1;
-    if (totals.late === 0) counts.lateZero += 1;
+    counts.warning += Math.max(0, warnings.length - getCustomZeroScoreWarningSuppressionCount(day));
+    if (isBuiltInRuleEnabled("min-day-power") && totals.power < rules.minDayPower) counts.powerShortage += 1;
+    if (isBuiltInRuleEnabled("min-day-staff") && totals.day < rules.minDayStaff) counts.dayShortage += 1;
+    const deepNightSymbol = getShiftTypes().find((type) => type.countsAsDeepNight)?.symbol;
+    const eveningSymbol = getShiftTypes().find((type) => type.countsAsEvening)?.symbol;
+    const lateSymbol = getShiftTypes().find((type) => type.countsAsLate)?.symbol;
+    if (isBuiltInRuleEnabled("min-deep-night") && totals.deepNight < rules.minDeepNightStaff && !(totals.deepNight === 0 && deepNightSymbol && isCustomZeroSuppressed(day, deepNightSymbol, "score"))) counts.deepNightZero += 1;
+    if (isBuiltInRuleEnabled("min-evening") && totals.evening < rules.minEveningStaff && !(totals.evening === 0 && eveningSymbol && isCustomZeroSuppressed(day, eveningSymbol, "score"))) counts.eveningZero += 1;
+    if (isBuiltInRuleEnabled("late-zero") && totals.late === 0 && !(lateSymbol && isCustomZeroSuppressed(day, lateSymbol, "score"))) counts.lateZero += 1;
+    counts.customPowerFollow += getCustomPowerFollowViolations(day).length;
 
     const violations = getScoreRuleViolations(day);
     counts.nightToAfter += violations.nightToAfter;
@@ -974,10 +1356,10 @@ function calculateShiftScore() {
 
   appData.staff.forEach((staff) => {
     const totals = getStaffTotals(staff.id);
-    if (totals.publicHoliday !== rules.targetPublicHoliday) counts.publicHolidayMismatch += 1;
+    if (isBuiltInRuleEnabled("public-holiday-target") && totals.publicHoliday !== rules.targetPublicHoliday) counts.publicHolidayMismatch += 1;
     dayCounts.push(totals.日);
     nightCounts.push(totals.入);
-    getStaffLimitViolations(staff).forEach((violation) => {
+    if (isBuiltInRuleEnabled("staff-limits")) getStaffLimitViolations(staff).forEach((violation) => {
       staffLimitItems.push({
         label: `${staff.name}さん ${violation.label}上限超過：${violation.count}/${violation.limit}`,
         points: -SCORE_RULES.staffLimitExceeded,
@@ -986,8 +1368,8 @@ function calculateShiftScore() {
     });
   });
 
-  if (getCountSpread(dayCounts) >= 4) counts.dayCountImbalance = 1;
-  if (getCountSpread(nightCounts) >= 3) counts.nightCountImbalance = 1;
+  if (isBuiltInRuleEnabled("staff-balance") && getCountSpread(dayCounts) >= 4) counts.dayCountImbalance = 1;
+  if (isBuiltInRuleEnabled("staff-balance") && getCountSpread(nightCounts) >= 3) counts.nightCountImbalance = 1;
 
   const breakdown = [
     createScoreCategory("警告件数", [
@@ -1000,6 +1382,7 @@ function calculateShiftScore() {
       createScoreItem("明0人", counts.deepNightZero, SCORE_RULES.deepNightZero, "日"),
       createScoreItem("入0人", counts.eveningZero, SCORE_RULES.eveningZero, "日"),
       createScoreItem("遅出0", counts.lateZero, SCORE_RULES.lateZero, "日"),
+      createScoreItem("カスタムP値フォロー不足", counts.customPowerFollow, SCORE_RULES.customPowerFollow, "日"),
       createScoreItem("P2以上の入被り", counts.seniorNightOverlap, SCORE_RULES.seniorNightOverlap, "日"),
       createScoreItem("P1入の複数配置", counts.juniorNightOverlap, SCORE_RULES.juniorNightOverlap, "日"),
       createScoreItem("入3人以上", counts.nightStaffExcess, SCORE_RULES.nightStaffExcess, "日"),
@@ -1252,6 +1635,11 @@ function renderCellEditorOptions() {
       const selected =
         uiState.editingCell &&
         getRequest(uiState.editingCell.staffId, uiState.editingCell.day) === request;
+      const label = request === "日/遅"
+        ? '<span class="shift-badge-label"><span class="request-only-mark">日/遅<span class="request-star">*</span></span><span>日勤または遅出</span></span>'
+        : request
+          ? createShiftBadgeLabel(request)
+          : createShiftBadgeLabel("");
       return `
         <button
           class="request-option ${selected ? "is-selected" : ""}"
@@ -1259,8 +1647,8 @@ function renderCellEditorOptions() {
           data-request="${request}"
           aria-label="${getRequestLabel(request)}"
         >
-          <span>${getRequestLabel(request)}</span>
-          ${request ? `<small>${request}*</small>` : ""}
+          ${label}
+          ${request ? `<small>${escapeHtml(request)}*</small>` : ""}
         </button>`;
     }).join("");
 
@@ -1337,16 +1725,31 @@ function renderPatternShiftButtons() {
 function renderAll() {
   elements.monthPicker.value = `${appData.display.year}-${String(appData.display.month + 1).padStart(2, "0")}`;
   applyHighlightColor();
+  renderPrintMeta();
   renderSchedule();
   renderSummary();
   renderStaffSettings();
   renderRuleSettings();
+  renderCustomSettings();
   renderShiftTypes();
   renderShiftTypeLegend();
   renderPatterns();
   renderNgPairs();
   renderInputMode();
   renderShiftScore();
+}
+
+function renderPrintMeta() {
+  const start = formatJapaneseEraDate(appData.display.year, appData.display.month + 1, 1);
+  const end = formatJapaneseEraDate(appData.display.year, appData.display.month + 1, getDaysInMonth());
+  const today = new Date();
+  elements.printPeriod.textContent = `${start}〜${end}`;
+  elements.printCreatedDate.textContent = formatJapaneseEraDate(
+    today.getFullYear(),
+    today.getMonth() + 1,
+    today.getDate(),
+  );
+  elements.printVersion.textContent = `Ver${APP_VERSION}`;
 }
 
 function renderShiftTypeLegend() {
@@ -1415,6 +1818,111 @@ function renderRuleSettings() {
         </label>`,
     )
     .join("");
+}
+
+function createShiftSelectOptions(selectedSymbol) {
+  return getShiftTypes().map((type) =>
+    `<option value="${escapeHtml(type.symbol)}" ${type.symbol === selectedSymbol ? "selected" : ""}>${escapeHtml(type.symbol)}：${escapeHtml(type.name)}</option>`,
+  ).join("");
+}
+
+function createZeroSuppressionRuleHtml(rule, index) {
+  return `
+    <section class="custom-rule" data-custom-rule-id="${escapeHtml(rule.id)}">
+      <div class="custom-rule-header">
+        <label class="custom-rule-toggle">
+          <input type="checkbox" data-custom-field="enabled" ${rule.enabled !== false ? "checked" : ""} />
+          <span>設定${index + 1}：人数条件で警告・減点を無効化</span>
+        </label>
+        <button class="custom-rule-delete" type="button" data-delete-custom-rule="${escapeHtml(rule.id)}">削除</button>
+      </div>
+      <p class="custom-rule-line">
+        もし
+        <select data-custom-field="conditionShift">${createShiftSelectOptions(rule.conditionShift)}</select>
+        が
+        <input type="number" min="0" max="31" value="${Number(rule.count) || 0}" data-custom-field="count" />
+        人
+        <select data-custom-field="comparison">
+          ${Object.entries(CUSTOM_RULE_COMPARISON_LABELS).map(([value, label]) => `<option value="${value}" ${rule.comparison === value ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+        なら
+      </p>
+      <p class="custom-rule-line">
+        <select data-custom-field="targetShift">${createShiftSelectOptions(rule.targetShift)}</select>
+        が0人の
+        <select data-custom-field="target">
+          ${Object.entries(CUSTOM_RULE_TARGET_LABELS).map(([value, label]) => `<option value="${value}" ${rule.target === value ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+        を無効にする
+      </p>
+    </section>`;
+}
+
+function createPowerFollowRuleHtml(rule, index) {
+  return `
+    <section class="custom-rule" data-custom-rule-id="${escapeHtml(rule.id)}">
+      <div class="custom-rule-header">
+        <label class="custom-rule-toggle">
+          <input type="checkbox" data-custom-field="enabled" ${rule.enabled !== false ? "checked" : ""} />
+          <span>設定${index + 1}：P値フォロー条件</span>
+        </label>
+        <button class="custom-rule-delete" type="button" data-delete-custom-rule="${escapeHtml(rule.id)}">削除</button>
+      </div>
+      <p class="custom-rule-line">
+        もし
+        <select data-custom-field="conditionPower">
+          ${[1, 2, 3, 4].map((power) => `<option value="${power}" ${rule.conditionPower === power ? "selected" : ""}>P${power}</option>`).join("")}
+        </select>
+        のスタッフが
+        <select data-custom-field="conditionShift">${createShiftSelectOptions(rule.conditionShift)}</select>
+        なら
+      </p>
+      <p class="custom-rule-line">
+        <select data-custom-field="requiredPowerMin">
+          ${[1, 2, 3, 4].map((power) => `<option value="${power}" ${rule.requiredPowerMin === power ? "selected" : ""}>P${power}以上</option>`).join("")}
+        </select>
+        のスタッフを
+        <select data-custom-field="requiredShift">${createShiftSelectOptions(rule.requiredShift)}</select>
+        に
+        <input type="number" min="0" max="31" value="${Number(rule.requiredCount) || 0}" data-custom-field="requiredCount" />
+        人以上必要
+      </p>
+    </section>`;
+}
+
+function renderCustomSettings() {
+  const rules = appData.settings.customRules ?? createDefaultCustomRules();
+  const builtInHtml = BUILT_IN_RULE_DEFINITIONS.map((rule) => `
+    <label class="built-in-rule">
+      <input type="checkbox" data-built-in-rule-id="${escapeHtml(rule.id)}" ${isBuiltInRuleEnabled(rule.id) ? "checked" : ""} />
+      <span>
+        <strong>${escapeHtml(rule.label)}</strong>
+        <small>${escapeHtml(rule.detail)}</small>
+      </span>
+    </label>`).join("");
+  const ruleHtml = rules.length
+    ? rules.map((rule, index) =>
+        rule.type === CUSTOM_RULE_TYPES.POWER_FOLLOW
+          ? createPowerFollowRuleHtml(rule, index)
+          : createZeroSuppressionRuleHtml(rule, index),
+      ).join("")
+    : '<p class="empty-custom-rules">カスタム設定はありません。</p>';
+  elements.customSettings.innerHTML = `
+    <section class="custom-rule built-in-rule-list">
+      <div class="custom-rule-group-heading">
+        <strong>組み込み判定</strong>
+        <span>現在の警告・評点ロジックです。削除はできません。</span>
+      </div>
+      ${builtInHtml}
+    </section>
+    <div class="custom-rule-add">
+      <button class="compact-button custom-rule-add-button" type="button" data-add-custom-rule>＋ カスタム設定を追加</button>
+      <select data-new-custom-rule-type aria-label="追加するカスタム設定タイプ">
+        <option value="${CUSTOM_RULE_TYPES.ZERO_SUPPRESSION}">人数条件で警告・減点を無効化</option>
+        <option value="${CUSTOM_RULE_TYPES.POWER_FOLLOW}">P値フォロー条件</option>
+      </select>
+    </div>
+    ${ruleHtml}`;
 }
 
 function getHighlightColor() {
@@ -1505,6 +2013,7 @@ function changeMonth(offset) {
   appData.display.month = target.getMonth();
   closeCellEditor();
   elements.autoPlacementResult.textContent = "";
+  renderPrintMeta();
   saveData();
   renderAll();
 }
@@ -1624,6 +2133,13 @@ function deleteStaff(staffId) {
   });
   Object.values(appData.requests).forEach((monthRequests) => {
     delete monthRequests[staffId];
+  });
+  Object.values(appData.dayNotes).forEach((monthNotes) => {
+    Object.values(monthNotes).forEach((note) => {
+      if (note && typeof note === "object" && Array.isArray(note.participantIds)) {
+        note.participantIds = note.participantIds.filter((id) => id !== staffId);
+      }
+    });
   });
   appData.ngPairs = appData.ngPairs.filter((pair) => !pair.includes(staffId));
 
@@ -2198,6 +2714,150 @@ function runAutoAdjustment() {
   return { initialScore, currentScore, acceptedCount };
 }
 
+function getCellExportValue(staffId, day) {
+  const shift = getShift(staffId, day);
+  const request = getRequest(staffId, day);
+  const value = shift || request;
+  if (!value) return "";
+  return request ? `${value}*` : value;
+}
+
+function escapeCsvValue(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getExportBaseName(kind) {
+  return `${appData.display.year}-${String(appData.display.month + 1).padStart(2, "0")}_${kind}`;
+}
+
+function exportScheduleCsv() {
+  const days = Array.from({ length: getDaysInMonth() }, (_, index) => index + 1);
+  const rows = [
+    ["氏名", "P", ...days],
+    ...appData.staff.map((staff) => [
+      staff.name,
+      staff.power,
+      ...days.map((day) => getCellExportValue(staff.id, day)),
+    ]),
+  ];
+  downloadCsv(`${getExportBaseName("勤務表")}.csv`, rows);
+  showNotice("勤務表CSVを出力しました。");
+}
+
+function exportStaffSummaryCsv() {
+  const rows = [["氏名", "P", "公", "日", "遅", "入", "明", "有", "夏", "冬"]];
+  appData.staff.forEach((staff) => {
+    const totals = getStaffTotals(staff.id);
+    rows.push([
+      staff.name,
+      staff.power,
+      totals.publicHoliday,
+      totals.day,
+      totals.late,
+      totals.evening,
+      totals.deepNight,
+      totals.paid,
+      totals.summer,
+      totals.winter,
+    ]);
+  });
+  downloadCsv(`${getExportBaseName("個人集計")}.csv`, rows);
+  showNotice("個人集計CSVを出力しました。");
+}
+
+function exportDailySummaryCsv() {
+  const rows = [["日", "曜日", "日勤", "深夜", "準夜", "遅出", "Power", "警告件数"]];
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  for (let day = 1; day <= getDaysInMonth(); day += 1) {
+    const totals = getDailyTotals(day);
+    rows.push([
+      day,
+      weekdays[new Date(appData.display.year, appData.display.month, day).getDay()],
+      totals.day,
+      totals.deepNight,
+      totals.evening,
+      totals.late,
+      totals.power,
+      getWarnings(day).length,
+    ]);
+  }
+  downloadCsv(`${getExportBaseName("日別集計")}.csv`, rows);
+  showNotice("日別集計CSVを出力しました。");
+}
+
+function exportWarningsCsv() {
+  const rows = [["日", "曜日", "種類", "内容"]];
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  for (let day = 1; day <= getDaysInMonth(); day += 1) {
+    const weekday = weekdays[new Date(appData.display.year, appData.display.month, day).getDay()];
+    getWarnings(day).forEach((warning) => rows.push([day, weekday, "警告", warning]));
+    getMonthBoundaryNotes(day).forEach((note) => rows.push([day, weekday, "月またぎ確認", note]));
+  }
+  downloadCsv(`${getExportBaseName("警告一覧")}.csv`, rows);
+  showNotice("警告一覧CSVを出力しました。");
+}
+
+function requestToShift(request) {
+  if (request === "日/遅") {
+    if (getShiftType("日")) return "日";
+    if (getShiftType("遅")) return "遅";
+    return "";
+  }
+  return getShiftType(request) ? request : "";
+}
+
+function applyRequestsToShifts() {
+  const targets = [];
+  const conflicts = [];
+  appData.staff.forEach((staff) => {
+    for (let day = 1; day <= getDaysInMonth(); day += 1) {
+      const request = getRequest(staff.id, day);
+      const shift = requestToShift(request);
+      if (!request || !shift) continue;
+      if (getShift(staff.id, day)) conflicts.push({ staff, day, shift });
+      else targets.push({ staff, day, shift });
+    }
+  });
+
+  let overwrite = false;
+  if (conflicts.length) {
+    overwrite = window.confirm(
+      `既に勤務が入っている希望セルが${conflicts.length}件あります。\n上書きして希望勤務を反映しますか？\n\nキャンセルすると空欄セルだけ反映します。`,
+    );
+  }
+
+  [...targets, ...(overwrite ? conflicts : [])].forEach(({ staff, day, shift }) => {
+    setShift(staff.id, day, shift);
+  });
+
+  const reflectedCount = targets.length + (overwrite ? conflicts.length : 0);
+  saveData();
+  renderSchedule();
+  renderSummary();
+  showNotice(
+    reflectedCount
+      ? `希望勤務を${reflectedCount}セル、勤務表へ反映しました。希望データは残っています。`
+      : "反映できる希望勤務はありませんでした。",
+    !overwrite && conflicts.length
+      ? [`既存勤務がある${conflicts.length}セルは上書きしませんでした。`]
+      : [],
+  );
+}
+
 function showNotice(message, details = []) {
   elements.appNoticeMessage.textContent = message;
   elements.appNoticeDetails.innerHTML = details
@@ -2233,6 +2893,112 @@ function showWarning(day) {
     .map((warning) => `<li>${escapeHtml(warning)}</li>`)
     .join("");
   elements.warningDialog.showModal();
+}
+
+function renderDayNoteStaffOptions(selectedIds = []) {
+  const selected = new Set(selectedIds);
+  elements.dayNoteStaffList.innerHTML = appData.staff.map((staff) => `
+    <label class="badge-checkbox">
+      <input type="checkbox" value="${escapeHtml(staff.id)}" data-day-note-staff ${selected.has(staff.id) ? "checked" : ""} />
+      <span>${escapeHtml(staff.name)}</span>
+      <small>P${staff.power}</small>
+    </label>`).join("");
+}
+
+function renderDayNoteRequestOptions(selectedShift = "") {
+  const options = ["", ...getShiftOptions({ includeBlank: false })];
+  elements.dayNoteRequestOptions.innerHTML = options.map((shift) => `
+    <label class="badge-radio">
+      <input type="radio" name="day-note-request-shift" value="${escapeHtml(shift)}" ${shift === selectedShift ? "checked" : ""} />
+      ${createShiftBadgeLabel(shift)}
+    </label>`).join("");
+}
+
+function openDayNoteDialog(day) {
+  closeCellEditor();
+  uiState.editingDayNote = day;
+  const note = getDayNote(day);
+  elements.dayNoteDialogTitle.textContent = `${appData.display.month + 1}月${day}日の行事予定`;
+  elements.dayNoteTitle.value = note.title;
+  elements.dayNoteMemo.value = note.memo;
+  elements.dayNoteError.textContent = "";
+  renderDayNoteStaffOptions(note.participantIds);
+  renderDayNoteRequestOptions(note.requestShift);
+  elements.dayNoteDialog.showModal();
+  elements.dayNoteTitle.focus();
+}
+
+function closeDayNoteDialog() {
+  elements.dayNoteDialog.close();
+  uiState.editingDayNote = null;
+  elements.dayNoteError.textContent = "";
+}
+
+function getSelectedDayNoteStaffIds() {
+  return Array.from(elements.dayNoteStaffList.querySelectorAll("[data-day-note-staff]:checked"))
+    .map((input) => input.value);
+}
+
+function getSelectedDayNoteRequestShift() {
+  return elements.dayNoteRequestOptions.querySelector('input[name="day-note-request-shift"]:checked')?.value ?? "";
+}
+
+function applyDayNoteRequests(day, participantIds, requestShift) {
+  if (!requestShift || !participantIds.length) return { applied: 0, skipped: 0 };
+  const conflicts = participantIds
+    .map((staffId) => ({ staffId, current: getRequest(staffId, day) }))
+    .filter(({ current }) => current && current !== requestShift);
+  const overwrite = conflicts.length
+    ? window.confirm(
+        `既に希望勤務が入っている参加スタッフが${conflicts.length}名います。\n行事予定の希望勤務で上書きしますか？\n\nキャンセルすると既存希望は残します。`,
+      )
+    : false;
+
+  let applied = 0;
+  let skipped = 0;
+  participantIds.forEach((staffId) => {
+    const current = getRequest(staffId, day);
+    if (current && current !== requestShift && !overwrite) {
+      skipped += 1;
+      return;
+    }
+    setRequest(staffId, day, requestShift);
+    applied += 1;
+  });
+  return { applied, skipped };
+}
+
+function saveDayNoteFromDialog() {
+  const day = uiState.editingDayNote;
+  if (!day) return;
+  const note = {
+    title: elements.dayNoteTitle.value.trim(),
+    memo: elements.dayNoteMemo.value.trim(),
+    participantIds: getSelectedDayNoteStaffIds(),
+    requestShift: getSelectedDayNoteRequestShift(),
+  };
+  setDayNote(day, note);
+  const requestResult = applyDayNoteRequests(day, note.participantIds, note.requestShift);
+  closeDayNoteDialog();
+  saveData();
+  renderSchedule();
+  showNotice(
+    note.title ? `行事予定「${note.title}」を保存しました。` : "行事予定を保存しました。",
+    [
+      requestResult.applied ? `参加スタッフ${requestResult.applied}名の希望勤務へ反映しました。` : "",
+      requestResult.skipped ? `既存希望がある${requestResult.skipped}名は上書きしませんでした。` : "",
+    ].filter(Boolean),
+  );
+}
+
+function deleteDayNoteFromDialog() {
+  const day = uiState.editingDayNote;
+  if (!day) return;
+  setDayNote(day, createEmptyDayNote());
+  closeDayNoteDialog();
+  saveData();
+  renderSchedule();
+  showNotice("行事予定を削除しました。反映済みの希望勤務は残っています。");
 }
 
 function openPatternDialog(pattern = null) {
@@ -2302,6 +3068,18 @@ function replaceShiftSymbol(oldSymbol, newSymbol) {
   appData.patterns.forEach((pattern) => {
     pattern.shifts = pattern.shifts.map((shift) => shift === oldSymbol ? newSymbol : shift);
   });
+  Object.values(appData.dayNotes).forEach((monthNotes) => {
+    Object.values(monthNotes).forEach((note) => {
+      if (note && typeof note === "object" && note.requestShift === oldSymbol) {
+        note.requestShift = newSymbol;
+      }
+    });
+  });
+  (appData.settings.customRules ?? []).forEach((rule) => {
+    ["conditionShift", "targetShift", "requiredShift"].forEach((key) => {
+      if (rule[key] === oldSymbol) rule[key] = newSymbol;
+    });
+  });
   appData.shiftTypes.forEach((type) => {
     if (type.requiredNext === oldSymbol) type.requiredNext = newSymbol;
     type.forbiddenNext = type.forbiddenNext.map((symbol) => symbol === oldSymbol ? newSymbol : symbol);
@@ -2360,7 +3138,13 @@ function isShiftTypeInUse(symbol) {
   const requestUse = Object.values(appData.requests).some((month) =>
     Object.values(month).some((days) => Object.values(days).includes(symbol)),
   );
-  return scheduleUse || requestUse || appData.patterns.some((pattern) => pattern.shifts.includes(symbol));
+  const dayNoteUse = Object.values(appData.dayNotes).some((month) =>
+    Object.values(month).some((note) => note && typeof note === "object" && note.requestShift === symbol),
+  );
+  const customRuleUse = (appData.settings.customRules ?? []).some((rule) =>
+    [rule.conditionShift, rule.targetShift, rule.requiredShift].includes(symbol),
+  );
+  return scheduleUse || requestUse || dayNoteUse || customRuleUse || appData.patterns.some((pattern) => pattern.shifts.includes(symbol));
 }
 
 function deleteShiftType(symbol) {
@@ -2378,6 +3162,14 @@ function deleteShiftType(symbol) {
   });
   saveData();
   renderAll();
+}
+
+function refreshCustomRuleEffects() {
+  saveData();
+  renderSchedule();
+  renderSummary();
+  renderCustomSettings();
+  renderShiftScore();
 }
 
 function createPatternId() {
@@ -2437,6 +3229,7 @@ function resetApplication() {
   closeCellEditor();
   if (elements.staffNameDialog.open) closeStaffNameDialog();
   if (elements.patternDialog.open) closePatternDialog();
+  if (elements.dayNoteDialog.open) closeDayNoteDialog();
   elements.autoPlacementResult.textContent = "";
   saveData();
   renderAll();
@@ -2529,6 +3322,50 @@ elements.ruleSettings.addEventListener("change", (event) => {
   renderSummary();
   renderRuleSettings();
 });
+
+elements.customSettings.addEventListener("click", (event) => {
+  const addButton = event.target.closest("[data-add-custom-rule]");
+  if (addButton) {
+    const type = elements.customSettings.querySelector("[data-new-custom-rule-type]")?.value ?? CUSTOM_RULE_TYPES.ZERO_SUPPRESSION;
+    appData.settings.customRules ??= [];
+    appData.settings.customRules.push(createCustomRuleTemplate(type));
+    refreshCustomRuleEffects();
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-custom-rule]");
+  if (deleteButton) {
+    appData.settings.customRules = (appData.settings.customRules ?? []).filter(
+      (rule) => rule.id !== deleteButton.dataset.deleteCustomRule,
+    );
+    refreshCustomRuleEffects();
+  }
+});
+
+elements.customSettings.addEventListener("change", (event) => {
+  const builtInToggle = event.target.closest("[data-built-in-rule-id]");
+  if (builtInToggle) {
+    appData.settings.builtInRules ??= createDefaultBuiltInRuleSettings();
+    appData.settings.builtInRules[builtInToggle.dataset.builtInRuleId] = builtInToggle.checked;
+    refreshCustomRuleEffects();
+    return;
+  }
+
+  const field = event.target.closest("[data-custom-field]");
+  const container = event.target.closest("[data-custom-rule-id]");
+  if (!field || !container) return;
+  const rule = appData.settings.customRules?.find((item) => item.id === container.dataset.customRuleId);
+  if (!rule) return;
+  const key = field.dataset.customField;
+  if (key === "enabled") {
+    rule.enabled = field.checked;
+  } else if (["count", "conditionPower", "requiredPowerMin", "requiredCount"].includes(key)) {
+    rule[key] = Math.max(0, Math.min(31, Number(field.value) || 0));
+  } else {
+    rule[key] = field.value;
+  }
+  refreshCustomRuleEffects();
+});
 elements.shiftScore.addEventListener("mouseenter", () => openScorePanel());
 elements.shiftScore.addEventListener("focus", () => openScorePanel());
 elements.shiftScore.addEventListener("mouseleave", () => closeScorePanel());
@@ -2553,6 +3390,7 @@ elements.monthPicker.addEventListener("change", (event) => {
   appData.display.month = month - 1;
   closeCellEditor();
   elements.autoPlacementResult.textContent = "";
+  renderPrintMeta();
   saveData();
   renderAll();
 });
@@ -2581,6 +3419,15 @@ elements.editPattern.addEventListener("click", () => openPatternDialog(getSelect
 elements.deletePattern.addEventListener("click", deleteSelectedPattern);
 elements.autoPlacePatterns.addEventListener("click", runAutoPlacement);
 elements.autoAdjustShifts.addEventListener("click", runAutoAdjustment);
+elements.applyRequestsToShifts.addEventListener("click", applyRequestsToShifts);
+elements.exportScheduleCsv.addEventListener("click", exportScheduleCsv);
+elements.exportStaffSummaryCsv.addEventListener("click", exportStaffSummaryCsv);
+elements.exportDailySummaryCsv.addEventListener("click", exportDailySummaryCsv);
+elements.exportWarningsCsv.addEventListener("click", exportWarningsCsv);
+elements.printCheck.addEventListener("click", () => {
+  renderPrintMeta();
+  window.print();
+});
 elements.addNgPair.addEventListener("click", addNgPair);
 elements.ngPairList.addEventListener("click", (event) => {
   const deleteButton = event.target.closest("[data-ng-pair-key]");
@@ -2591,13 +3438,7 @@ elements.ngPairList.addEventListener("click", (event) => {
 elements.scheduleTable.addEventListener("click", (event) => {
   const noteButton = event.target.closest("[data-note-day]");
   if (noteButton) {
-    const day = Number(noteButton.dataset.noteDay);
-    const current = getDayNote(day);
-    const next = window.prompt(`${appData.display.month + 1}月${day}日の祝祭日・行事予定`, current);
-    if (next === null) return;
-    setDayNote(day, next);
-    saveData();
-    renderSchedule();
+    openDayNoteDialog(Number(noteButton.dataset.noteDay));
     return;
   }
 
@@ -2695,6 +3536,14 @@ elements.patternEditorForm.addEventListener("submit", (event) => {
 });
 elements.patternDialogClose.addEventListener("click", closePatternDialog);
 elements.patternDialogCancel.addEventListener("click", closePatternDialog);
+
+elements.dayNoteForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveDayNoteFromDialog();
+});
+elements.dayNoteClose.addEventListener("click", closeDayNoteDialog);
+elements.dayNoteCancel.addEventListener("click", closeDayNoteDialog);
+elements.dayNoteDelete.addEventListener("click", deleteDayNoteFromDialog);
 
 elements.staffNameForm.addEventListener("submit", (event) => {
   event.preventDefault();
