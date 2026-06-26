@@ -2581,7 +2581,7 @@ thead .power-column {
 
 @media (min-width: 1121px) {
   .summary-card .card-heading {
-    min-height: 84px;
+    min-height: 52px;
   }
 
   .summary-card .side-table thead th {

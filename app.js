@@ -3010,7 +3010,7 @@ function downloadCsv(filename, rows) {
 }
 
 function getExportBaseName(kind) {
-  return `${appData.display.year}-${String(appData.display.month + 1).padStart(2, "0")}_${kind}`;
+  return `Shift Fit_${appData.display.year}-${String(appData.display.month + 1).padStart(2, "0")}_${kind}`;
 }
 
 function openExportDialog() {
